@@ -13,7 +13,7 @@ echo "GitHub 用户: $ME"
 
 echo "== 2) fork 上游（若未 fork）=="
 if ! gh api "repos/$ME/dsh-plugin-guard" > /dev/null 2>&1; then
-  gh repo fork lxzy-7/dsh-plugin-guard --clone=false --remote=false
+  gh repo fork lxzy-7/dsh-plugin-guard
   echo "已发起 fork，等待仓库就绪..."
   for i in $(seq 1 30); do
     gh api "repos/$ME/dsh-plugin-guard" > /dev/null 2>&1 && break
