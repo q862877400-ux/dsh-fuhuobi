@@ -104,9 +104,9 @@ export function incidentSectionText() {
     const name = typeof inc.pluginName === 'string' ? inc.pluginName : id
     return [
       '【需要留意 · 插件已被隔离(disabled)】',
-      `插件 ${name} (id: ${id}) 与当前 DSH 不兼容：回滚无法解决，guard 已自动禁用它并正常启动。`,
+      `插件 ${name} (id: ${id}) 与当前 DSH 不兼容：回滚无法解决，复活币已自动禁用它并正常启动。`,
       `处理方式: ①升级该插件到与当前 DSH 兼容的版本后再恢复; ②或确认不需要它(保持禁用)。`,
-      `恢复命令: dsh-guard quarantine --undo ${id}`,
+      `恢复命令: dsh-fuhuobi quarantine --undo ${id}`,
       '若已处理完毕，调用 incident_resolved 工具清除本提示。',
     ].join('\n')
   }
