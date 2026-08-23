@@ -25,6 +25,9 @@
     "README.md",
     "LICENSE"
   ],
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
   "scripts": {
     "test": "node scripts/smoke-test.js",
     "prepublishOnly": "npm test"
