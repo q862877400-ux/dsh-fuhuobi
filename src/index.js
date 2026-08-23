@@ -1,25 +1,28 @@
-// dsh-plugin-guard — install safety net for DeepSeek Harness.
+// dsh-fuhuobi — 一键复活：DSH 插件安装安全网。
 //
-// In-process half (this plugin):
-//  1. systemPrompt section (order -50, before the persona): when
-//     $DSH_HOME/guard/pending-incident.json exists it injects an instruction
-//     that makes the pending incident the session's first task.
-//  2. Tools: incident_resolved, dsh_snapshot, dsh_rollback.
-//  3. Pre-tool guard: automatically snapshots every profile before
-//     plugin_install / plugin_uninstall / plugin_toggle run (never denies).
-//  4. HTTP API (via webServer, when present) backing the 设置 > 备份管理
-//     panel: state / snapshot / rollback / keep.
+// 进程内部分（本插件）：
+//  1. systemPrompt 段（order -50，在 persona 之前）：当
+//     $DSH_HOME/guard/pending-incident.json 存在时，注入指令让待处理
+//     事故成为本会话的首要任务。
+//  2. 工具：incident_resolved、dsh_snapshot、dsh_rollback。
+//  3. 工具前守卫：在 plugin_install / plugin_uninstall / plugin_toggle
+//     执行前自动对所有 profile 做快照（从不拒绝执行）。
+//  4. HTTP API（经 webServer，存在时注册）支撑 设置 > 复活币口袋 面板：
+//     state / snapshot / rollback / keep / revive-coin。
+//  5. 启动成功自动存复活币（boot-guard 两阶段健康检查通过后触发）。
 //
-// Out-of-process halves (scripts/): standalone CLI (`dsh-guard`), boot guard
-// scripts for Windows and POSIX, and PATH shims — see README.
-import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, DEFAULT_KEEP_SNAPSHOTS, MIN_KEEP_SNAPSHOTS, MAX_KEEP_SNAPSHOTS } from './engine.js'
+// 进程外部分（scripts/）：独立命令行（`dsh-fuhuobi`）、守护启动脚本（Windows 与
+// POSIX）、以及复活币快捷方式脚本 — 详见 README。
+import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, markReviveCoin, DEFAULT_KEEP_SNAPSHOTS, MIN_KEEP_SNAPSHOTS, MAX_KEEP_SNAPSHOTS } from './engine.js'
 import { incidentSectionText, readPending, resolveIncidentMarker } from './incident.js'
 import { createGuardTools } from './tools.js'
 import z from '@deepseek-ai/schemastery'
 
-export const name = 'guard'
+export const name = 'fuhuobi'
 
 const GUARDED_TOOLS = new Set(['plugin_install', 'plugin_uninstall', 'plugin_toggle'])
+// 复活币：启动成功时标记的 profile（当前会话运行的 profile）
+const REVIVE_COIN_PROFILE = process.env.DSH_PROFILE || 'web'
 
 // Host-side settings scope for this plugin's own namespace (`guard`), set when
 // the settings service is available. keepSnapshots stays authoritative in
@@ -111,8 +114,8 @@ async function handleKeep(req, res) {
 }
 
 // ── 客户端渲染心跳 / 崩溃回报（黑屏检测）。rc.7 的客户端渲染失败是纯浏览器
-// 侧事件，服务端 HTTP 仍返回 200；guard 客户端在根槽位渲染成功时 POST
-// /guard/api/booted，在根槽位渲染崩溃时 POST /guard/api/render-error，守护
+// 侧事件，服务端 HTTP 仍返回 200；复活币客户端在根槽位渲染成功时 POST
+// /fuhuobi/api/booted，在根槽位渲染崩溃时 POST /fuhuobi/api/render-error，守护
 // 脚本据此区分"服务已起"与"客户端真的能用"。均为进程内内存标志。──
 let guardClientBooted = false
 let guardRenderError = null // string message; null = 无渲染崩溃
@@ -141,12 +144,27 @@ async function handleRenderError(req, res) {
   } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
 }
 
+// ── 复活币 API：手动存币 / 查看复活币状态 ──
+async function handleReviveCoin(req, res) {
+  try {
+    if (req.method === 'POST') {
+      const r = markReviveCoin(REVIVE_COIN_PROFILE)
+      if (!r.ok) return send(res, { ok: false, error: r.error ?? '存币失败' })
+      return send(res, { ok: true, stamp: r.stamp, previous: r.previous })
+    }
+    // GET: 返回复活币状态
+    const { readReviveCoin } = await import('./engine.js')
+    const coin = readReviveCoin()
+    send(res, { ok: true, coin })
+  } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
+}
+
 export function apply(ctx) {
   // 1. Incident-alert prompt section.
   const sp = ctx.get('systemPrompt')
   if (sp !== undefined) {
     sp.section({
-      name: 'guard:incident-alert',
+      name: 'fuhuobi:incident-alert',
       order: -50,
       text: () => incidentSectionText(),
     })
@@ -180,19 +198,20 @@ export function apply(ctx) {
   // non-blocking — a profile without webServer simply never gets the routes.
   ctx.inject(['webServer'], (wctx) => {
     const routes = [
-      { kind: 'exact', path: '/guard/api/state', handler: handleState },
-      { kind: 'exact', path: '/guard/api/snapshot', handler: handleSnapshot },
-      { kind: 'exact', path: '/guard/api/rollback', handler: handleRollback },
-      { kind: 'exact', path: '/guard/api/keep', handler: handleKeep },
-      { kind: 'exact', path: '/guard/api/booted', handler: handleBooted },
-      { kind: 'exact', path: '/guard/api/render-error', handler: handleRenderError },
+      { kind: 'exact', path: '/fuhuobi/api/state', handler: handleState },
+      { kind: 'exact', path: '/fuhuobi/api/snapshot', handler: handleSnapshot },
+      { kind: 'exact', path: '/fuhuobi/api/rollback', handler: handleRollback },
+      { kind: 'exact', path: '/fuhuobi/api/keep', handler: handleKeep },
+      { kind: 'exact', path: '/fuhuobi/api/booted', handler: handleBooted },
+      { kind: 'exact', path: '/fuhuobi/api/render-error', handler: handleRenderError },
+      { kind: 'exact', path: '/fuhuobi/api/revive-coin', handler: handleReviveCoin },
     ]
     for (const route of routes) {
-      wctx.effect(() => wctx.webServer.register(route), `guard: ${route.path} route`)
+      wctx.effect(() => wctx.webServer.register(route), `fuhuobi: ${route.path} route`)
     }
   })
 
-  // 4. rc.7 plugin-owned settings surface: register a `guard` namespace so the
+  // 4. rc.7 plugin-owned settings surface: register a `fuhuobi` namespace so the
   // plugin appears in 设置 > 插件 > 插件配置 as a configurable card (schema
   // validated + revision fenced via ctx.settings). config.json stays the
   // authoritative store for the out-of-process CLI/boot-guard: the settings doc
@@ -201,7 +220,7 @@ export function apply(ctx) {
   ctx.inject(['settings'], (sctx) => {
     try {
       const cfg = readGuardConfig()
-      const scope = sctx.settings.register('guard', z.object({
+      const scope = sctx.settings.register('fuhuobi', z.object({
         keepSnapshots: z.number().min(MIN_KEEP_SNAPSHOTS).max(MAX_KEEP_SNAPSHOTS).default(cfg.keepSnapshots),
       }), { base: { keepSnapshots: cfg.keepSnapshots } })
       guardSettingsScope = scope
@@ -220,13 +239,13 @@ export function apply(ctx) {
       const llm = ctx.get('llm')
       if (llm !== undefined) {
         try {
-          llm.registerConfigurableProviders([{ provider: 'guard', displayName: '备份管理（dsh-plugin-guard）' }])
+          llm.registerConfigurableProviders([{ provider: 'fuhuobi', displayName: '复活币口袋（dsh-fuhuobi）' }])
         } catch { /* best effort */ }
       }
     } catch {
       // settings unavailable — the guard runs without the namespace
     }
-    sctx.effect(() => () => { guardSettingsScope = null }, 'guard: settings scope teardown')
+    sctx.effect(() => () => { guardSettingsScope = null }, 'fuhuobi: settings scope teardown')
   })
 }
 
