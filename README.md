@@ -145,3 +145,153 @@ npm publish
 ## License
 
 MIT
+
+---
+
+# One-Click Revival (dsh-fuhuobi)
+
+> Give yourself a revival coin — back up once, and never panic again.
+
+```
+Revival Coin ×1
+A spare flame, forged ere the plugin was sown.
+When all crumbles to ash, double-click this humble token — and the embers shall catch anew.
+(One-click restore to the last successful boot state.)
+```
+
+Installed a plugin that broke everything? Boot won't start? No fear — as long as you have a revival coin, you can restore with one click.
+
+After every successful boot, a revival coin (config snapshot) is minted automatically. When something goes wrong, double-click the coin and DSH instantly returns to the last known-good state.
+
+## Quick Start
+
+```sh
+# Install from GitHub
+dsh plugin --profile web add github:q862877400-ux/dsh-fuhuobi
+
+# Or from npm
+dsh plugin --profile web add dsh-fuhuobi
+```
+
+Restart `dsh web`. This is a standard **bundle plugin**: it joins the profile layer stack and takes effect automatically.
+
+**Guarded boot is strongly recommended** (`scripts/boot-guard.ps1` on Windows / `scripts/boot-guard.sh` on macOS/Linux) instead of launching directly — only guarded boot mints the revival coin automatically.
+
+## How the Revival Coin Works
+
+### Three-level rotation
+
+```
+Successful boot #1 → snapshot A → coin = A
+Successful boot #2 → snapshot B → coin = B, A becomes "previous backup"
+Successful boot #3 → snapshot C → coin = C, B becomes "previous backup", A is deleted
+```
+
+Always keeps: **1 current revival coin + 1 previous backup**, at most 2 coin-only snapshots.
+
+### When the coin is minted automatically
+
+| When | What |
+|------|------|
+| ✅ Successful boot | After the boot-guard's two-phase health check (HTTP up + client render confirmed) |
+| ✅ Manual | In the Web UI "复活币口袋" page, or `dsh-fuhuobi revive-coin --mark` |
+| ⚡ Before plugin install | Automatic snapshot (tag `auto-before-install`) to guard against accidents |
+
+### How to revive
+
+| Crash scenario | How to recover |
+|----------------|----------------|
+| Page opens but black screen | 🔥 Fullscreen revival UI — click "使用复活币" to roll back and refresh (closable via ✕ in the top-right) |
+| Page opens with an error screen | Hint in the bottom-right: "double-click DSH复活币X1 on the desktop to restore" (does not block the error) |
+| Page won't open (server down) | CLI hint: double-click DSH复活币X1 in the desktop/root dir, or `dsh-fuhuobi revive-coin` |
+| Everything above fails | 📁 `DSH复活币X1.cmd` in the desktop/DSH root — double-click to restore |
+
+`DSH复活币X1.cmd` is auto-created in `$DSH_HOME/`, with a desktop shortcut as well (the root-dir copy always exists even without desktop permissions).
+
+## Commands
+
+```
+dsh-fuhuobi snapshot [--profile X] [--tag T] [--reason R] [--force]   manual snapshot
+dsh-fuhuobi list     [--profile X]                                     list snapshots
+dsh-fuhuobi rollback [--profile X] [--id I | --good] [--skip-install]  roll back to a snapshot / last good one
+dsh-fuhuobi keep     [N]                                               show / set snapshot retention (min 2)
+dsh-fuhuobi health   [--port N]                                        check backend health
+dsh-fuhuobi incident [--kind K] [--no-marker]                          write an incident report
+dsh-fuhuobi resolve                                                    mark the pending incident as resolved
+dsh-fuhuobi revive-coin [--profile X] [--mark]                         show / mint a revival coin
+dsh-fuhuobi revive-coin --use                                         restore from the current coin (used by DSH复活币X1.cmd)
+dsh-fuhuobi quarantine --diagnose                                     identify the plugin that broke boot
+dsh-fuhuobi quarantine --plugin <id> [--undo]                         quarantine (disable) / restore a plugin
+dsh-fuhuobi quarantine --list                                         list quarantined plugins
+dsh-fuhuobi profiles                                                  list all profiles
+```
+
+## Use in the DSH Web UI
+
+Open **设置 → 复活币口袋**:
+
+- View each environment (profile)'s snapshots and current/previous coin
+- Click "用此复活币复活" to restore a snapshot
+- Click "＋ 手动存币" to mint a coin manually
+- Set how many snapshots each environment keeps (min 2)
+
+## Configuration
+
+`$DSH_HOME/guard/config.json` (auto-created on first write; all optional):
+
+```json
+{
+  "keepSnapshots": 10,
+  "port": 3080
+}
+```
+
+All paths are anchored at `$DSH_HOME` (defaults to `~/.dsh`):
+
+```
+$DSH_HOME/rollbacks/<profile>/<stamp>/   snapshots (5 config files + manifest.json)
+$DSH_HOME/guard/logs/                    boot/server logs, incident reports
+$DSH_HOME/guard/pending-incident.json    pending incident marker
+$DSH_HOME/guard/revive-coin.json         revival coin state (current + previous)
+$DSH_HOME/DSH复活币X1.cmd                one-click revival script (double-click to use)
+```
+
+## Rollback Semantics
+
+- Rollback = restore the 5 config files + `pnpm install --frozen-lockfile` to reproduce `node_modules` exactly.
+- A `pre-rollback` snapshot is always taken before any rollback: **rollback itself is reversible**.
+- "Last good" = the newest snapshot not tagged `pre-boot`/`pre-rollback`.
+
+## Security Notes
+
+- The plugin only reads/writes profile config files and snapshots; it never executes third-party code.
+- Snapshots and incident reports are local files without credentials.
+- Automatic rollback only happens when the boot health check fails; it never silently changes config during normal runtime.
+
+## Platform Support
+
+| Component | Windows | macOS/Linux |
+|-----------|---------|-------------|
+| Plugin (tools/hooks/prompt injection) | ✅ | ✅ |
+| dsh-fuhuobi CLI | ✅ | ✅ |
+| Guarded boot script | PowerShell | bash |
+| Desktop shortcut | ✅ automatic | manual (hint to drag to desktop) |
+
+## Development
+
+```sh
+node scripts/smoke-test.js    # engine smoke test (throwaway DSH_HOME, no side effects)
+node scripts/guard-cli.js help
+```
+
+## Publishing
+
+MIT licensed, zero runtime dependencies. `prepublishOnly` runs the smoke test before every publish.
+
+```sh
+npm publish
+```
+
+## License
+
+MIT
