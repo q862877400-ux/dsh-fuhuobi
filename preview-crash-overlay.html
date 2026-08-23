@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>DSH 复活币 — 黑屏覆盖层预览</title>
+<style>
+  body { margin: 0; font-family: ui-monospace, Consolas, "Courier New", monospace; }
+  /* 模拟 DSH 崩溃后的黑屏背景（覆盖层之外的"页面"） */
+  .page { height: 100vh; background: #1a1712; display: flex; align-items: center; justify-content: center; }
+  .page-inner { color: #4a4438; font-size: 20px; letter-spacing: 3px; }
+
+  /* ===== 以下是从 lib/client.js CrashOverlay 原样还原的样式 ===== */
+  .crash-overlay {
+    position: fixed; inset: 0; z-index: 999999;
+    background: rgba(8,6,12,.96);
+    display: flex; align-items: center; justify-content: center;
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+  }
+  .crash-close {
+    position: absolute; top: 18px; right: 24px;
+    background: transparent; border: none; cursor: pointer;
+    font-size: 33px; color: rgba(255,255,255,.85); line-height: 1;
+    padding: 9px; z-index: 2;
+  }
+  .crash-card { max-width: 840px; padding: 48px; text-align: center; color: #e8e2d8; }
+  .crash-you-died {
+    font-size: 108px; font-weight: bold; letter-spacing: 18px;
+    color: #c1121f; margin-bottom: 18px;
+    text-shadow: 0 0 45px rgba(193,18,31,.6), 0 0 12px rgba(193,18,31,.8);
+  }
+  .crash-msg { font-size: 25.5px; line-height: 1.8; margin-bottom: 42px; color: #d8cfc2; }
+  .crash-sub { color: #8a8078; font-size: 19.5px; }
+  .crash-btn {
+    font-size: 25.5px; padding: 21px 66px; cursor: pointer;
+    background: linear-gradient(180deg,#6b4a2f,#4a3220);
+    border: 1px solid #8a6a45; border-radius: 12px; color: #ffe9c9;
+    letter-spacing: 4.5px; font-family: inherit;
+  }
+  .crash-btn:disabled { opacity: .6; cursor: wait; }
+  .crash-err { margin-top: 24px; color: #c96b5b; font-size: 19.5px; }
+  .crash-hint { margin-top: 42px; font-size: 18px; color: #6f665c; line-height: 1.7; }
+
+  /* 报错界面右下角提示 */
+  .error-hint {
+    position: fixed; right: 18px; bottom: 60px; z-index: 9990;
+    font-size: 16.5px; color: rgba(140,132,120,.7);
+    background: rgba(20,16,12,.6); padding: 9px 15px; border-radius: 9px;
+    pointer-events: none; user-select: none;
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+  }
+</style>
+</head>
+<body>
+
+<!-- 模拟的崩溃页面背景（覆盖层会盖住它） -->
+<div class="page">
+  <div class="page-inner">（这里是 DSH 崩溃后的黑屏）</div>
+</div>
+
+<!-- 黑屏覆盖层：CrashOverlay 1:1 还原 -->
+<div class="crash-overlay" id="overlay">
+  <button class="crash-close" id="closeBtn" aria-label="关闭" title="关闭（可改用桌面 DSH复活币X1.cmd 恢复）">✕</button>
+  <div class="crash-card">
+    <div class="crash-you-died">DIE</div>
+    <div class="crash-msg">
+      DSH 因插件崩溃而倒下。<br>
+      别怕，复活币还在。<br>
+      <span class="crash-sub">（回滚到上一次成功启动的状态）</span>
+    </div>
+    <button class="crash-btn" id="reviveBtn">🔥 使用复活币</button>
+    <div class="crash-err" id="errBox" style="display:none"></div>
+    <div class="crash-hint">
+      若网页也打不开，请到 DSH 根目录或桌面双击<br>
+      「DSH复活币X1」手动恢复。
+    </div>
+  </div>
+</div>
+
+<!-- 报错界面右下角提示 -->
+<div class="error-hint">💀 别慌，双击桌面「DSH复活币X1」即可恢复</div>
+
+<script>
+  // 交互：点 ✕ 关闭覆盖层（可重新打开）
+  const overlay = document.getElementById('overlay')
+  const closeBtn = document.getElementById('closeBtn')
+  const reviveBtn = document.getElementById('reviveBtn')
+  const errBox = document.getElementById('errBox')
+
+  closeBtn.addEventListener('click', () => {
+    overlay.style.display = 'none'
+  })
+  // 双击页面空白可重新打开（模拟再次崩溃）
+  document.addEventListener('dblclick', (e) => {
+    if (overlay.style.display === 'none') overlay.style.display = 'flex'
+  })
+
+  // 交互：点复活按钮 → 模拟"回滚中"→"已恢复"
+  reviveBtn.addEventListener('click', () => {
+    reviveBtn.disabled = true
+    reviveBtn.textContent = '复活中…'
+    setTimeout(() => {
+      reviveBtn.textContent = '已恢复，即将刷新…'
+      setTimeout(() => {
+        errBox.style.display = 'block'
+        errBox.textContent = '（预览模式：真实环境会刷新页面重新加载 DSH）'
+        reviveBtn.disabled = false
+        reviveBtn.textContent = '🔥 使用复活币'
+      }, 1500)
+    }, 1200)
+  })
+</script>
+</body>
+</html>
