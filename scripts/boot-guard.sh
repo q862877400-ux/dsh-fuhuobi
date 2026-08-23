@@ -19,8 +19,8 @@ HARNESS_ROOT="${HARNESS_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 DSH_HOME="${DSH_HOME:-$HOME/.dsh}"
 export DSH_HOME
 
-CLI="$DSH_HOME/profiles/$PROFILE/node_modules/dsh-plugin-guard/scripts/guard-cli.js"
-[ -f "$CLI" ] || CLI="$HARNESS_ROOT/node_modules/dsh-plugin-guard/scripts/guard-cli.js"
+CLI="$DSH_HOME/profiles/$PROFILE/node_modules/dsh-fuhuobi/scripts/guard-cli.js"
+[ -f "$CLI" ] || CLI="$HARNESS_ROOT/node_modules/dsh-fuhuobi/scripts/guard-cli.js"
 
 LOG_DIR="$DSH_HOME/guard/logs"
 mkdir -p "$LOG_DIR"
@@ -73,6 +73,8 @@ log "started server (pgid $PID)"
 if wait_healthy "$FIRST_WAIT_SEC"; then
   log "boot ok on first attempt"
   set_status OK first-attempt
+  # 两阶段健康检查通过：自动存一枚复活币（三级旋转）。
+  guard revive-coin --mark
   # Stay attached so launchers that kill the process group on window close
   # keep their close-to-quit semantics.
   wait
@@ -88,12 +90,21 @@ PID2=$(start_server)
 log "restarted server (pgid $PID2)"
 if wait_healthy "$RETRY_WAIT_SEC"; then
   set_status OK rolled-back-retry
+  guard revive-coin --mark
 else
   stop_server "$PID2"
   set_status FAILED boot-failed
 fi
 
 guard incident --kind boot-failure
+
+echo ""
+echo "=================================================="
+echo " [DSH 复活币] 启动失败！"
+echo " 请双击桌面或 DSH 根目录的「DSH复活币X1」恢复，"
+echo " 或运行: dsh-fuhuobi revive-coin"
+echo "=================================================="
+echo ""
 
 if healthy; then
   wait
