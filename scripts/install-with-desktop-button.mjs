@@ -91,7 +91,7 @@ function makeButton(targetDir, dshHome, cliPath, profile) {
     "@echo off",
     "chcp 65001 >nul",
     "echo ============================================",
-    "echo   DSH 插件回滚（dsh-plugin-guard）",
+    "echo   DSH 插件回滚（dsh-bie-beng · 插件别崩！！）",
     "echo   还原最近一次成功启动时的插件配置快照，并重建依赖",
     "echo   本按钮独立于 DSH 运行：DSH 崩溃时也可用",
     "echo ============================================",

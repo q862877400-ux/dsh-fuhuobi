@@ -1,7 +1,9 @@
-# dsh-plugin-guard（中文版）
+# dsh-bie-beng · 插件别崩！！
 
-> DeepSeek Harness 的**插件安装安全网**：安装前自动快照、一键/自动回退、守护启动、事故报告自动触发 Agent 分析。
-> 本仓库为上游 [lxzy-7/dsh-plugin-guard](https://github.com/lxzy-7/dsh-plugin-guard) 的 fork，新增：**桌面回滚按钮自动生成脚本** + 中文文档。
+> 装了个新插件，重启又崩了！又得把报错信息复制给网页版 DeepSeek？
+> **让老夫代劳吧**——装前自动快照、崩了自动回滚、桌面一键救回，坏插件直接隔离，报错自动写报告。
+>
+> 上游： [lxzy-7/dsh-plugin-guard](https://github.com/lxzy-7/dsh-plugin-guard)（本仓库为 fork，新增桌面回滚按钮 + 中文文档）
 
 ## 它解决什么问题
 
@@ -36,10 +38,10 @@
 
 ```sh
 # 从 GitHub 源码（本 fork）：
-dsh plugin --profile web add github:<你的用户名>/dsh-plugin-guard
+dsh plugin --profile web add github:q862877400-ux/dsh-bie-beng
 
 # 从 npm（上游发布后）：
-dsh plugin --profile web add dsh-plugin-guard
+dsh plugin --profile web add dsh-bie-beng
 ```
 
 重启 `dsh web` 生效。
@@ -70,6 +72,8 @@ node scripts/install-with-desktop-button.mjs --profile web
 ```
 
 ## 与上游的差异（本 fork）
+
+改名说明：本 fork 已改名为 `dsh-bie-beng`（插件别崩！！），描述与 README 走中文俏皮风；功能与上游一致。
 
 1. **新增** `scripts/install-with-desktop-button.mjs`：一键安装 + 桌面固定按钮自动生成（读注册表定位桌面，OneDrive 重定向兼容，回退到 `%USERPROFILE%\Desktop` / 当前工作目录）
 2. **新增** 中文文档（本文件前半部分）

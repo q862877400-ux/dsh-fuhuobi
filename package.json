@@ -1,7 +1,7 @@
 {
-  "name": "dsh-plugin-guard",
-  "version": "0.3.2",
-  "description": "Install safety net for DeepSeek Harness: pre-install snapshots, one-click/automatic rollback, guarded boot, and incident reports that auto-trigger agent analysis. DeepSeek Harness 插件安装安全网：安装前自动快照、一键/自动回退、守护启动、事故报告自动触发 Agent 分析。",
+  "name": "dsh-bie-beng",
+  "version": "0.1.0",
+  "description": "插件别崩！！装个新插件，重启又崩了？报错复制给网页版 DeepSeek 让它修？让老夫代劳吧——装前自动快照、崩了自动回滚、桌面一键救回，还会帮你隔离坏插件、写事故报告。",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/lxzy-7/dsh-plugin-guard.git"
@@ -44,7 +44,10 @@
     "plugin",
     "rollback",
     "snapshot",
-    "guard"
+    "guard",
+    "插件别崩",
+    "dsh插件回滚",
+    "dsh插件备份"
   ],
   "dsh": {
     "bundle": {

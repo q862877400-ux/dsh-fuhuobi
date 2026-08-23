@@ -112,7 +112,7 @@ export function incidentSectionText() {
   }
   const report = typeof inc.report === 'string' ? inc.report : '(path missing)'
   return [
-    '【高优先级 · 待处理的 DSH 事故】',
+    '【插件别崩！！· 上次翻车记录待处理】',
     `检测到一次 ${kind} 事故(发生时间:${time})。`,
     `事故定位报告已生成:${report}`,
     '本会话的首要任务:先读取该报告文件,定位根因;能修复的直接修复(修复前先做快照),',
