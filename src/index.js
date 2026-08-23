@@ -13,7 +13,7 @@
 //
 // 进程外部分（scripts/）：独立命令行（`dsh-fuhuobi`）、守护启动脚本（Windows 与
 // POSIX）、以及复活币快捷方式脚本 — 详见 README。
-import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, markReviveCoin, DEFAULT_KEEP_SNAPSHOTS, MIN_KEEP_SNAPSHOTS, MAX_KEEP_SNAPSHOTS } from './engine.js'
+import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, markReviveCoin, desktopShortcutEnabled, setDesktopShortcutEnabled, DEFAULT_KEEP_SNAPSHOTS, MIN_KEEP_SNAPSHOTS, MAX_KEEP_SNAPSHOTS } from './engine.js'
 import { incidentSectionText, readPending, resolveIncidentMarker } from './incident.js'
 import { createGuardTools } from './tools.js'
 import z from '@deepseek-ai/schemastery'
@@ -67,7 +67,7 @@ async function handleState(_req, res) {
         reason: s.reason,
       })),
     }))
-    send(res, { ok: true, keepSnapshots: readGuardConfig().keepSnapshots, profiles })
+    send(res, { ok: true, keepSnapshots: readGuardConfig().keepSnapshots, desktopShortcut: desktopShortcutEnabled(), profiles })
   } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
 }
 
@@ -110,6 +110,18 @@ async function handleKeep(req, res) {
       try { await guardSettingsScope.update({ keepSnapshots: num }) } catch { /* config.json wins; ignore */ }
     }
     send(res, { ok: true, keepSnapshots: num })
+  } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
+}
+
+// ── 桌面快捷方式开关：GET 读当前值 / POST 写入 ──
+async function handleDesktopShortcut(req, res) {
+  try {
+    if (req.method === 'POST') {
+      const body = await readBody(req)
+      const enabled = setDesktopShortcutEnabled(body.enabled === true)
+      return send(res, { ok: true, desktopShortcut: enabled })
+    }
+    send(res, { ok: true, desktopShortcut: desktopShortcutEnabled() })
   } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
 }
 
@@ -202,6 +214,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/fuhuobi/api/snapshot', handler: handleSnapshot },
       { kind: 'exact', path: '/fuhuobi/api/rollback', handler: handleRollback },
       { kind: 'exact', path: '/fuhuobi/api/keep', handler: handleKeep },
+      { kind: 'exact', path: '/fuhuobi/api/desktop-shortcut', handler: handleDesktopShortcut },
       { kind: 'exact', path: '/fuhuobi/api/booted', handler: handleBooted },
       { kind: 'exact', path: '/fuhuobi/api/render-error', handler: handleRenderError },
       { kind: 'exact', path: '/fuhuobi/api/revive-coin', handler: handleReviveCoin },
@@ -222,15 +235,17 @@ export function apply(ctx) {
       const cfg = readGuardConfig()
       const scope = sctx.settings.register('fuhuobi', z.object({
         keepSnapshots: z.number().min(MIN_KEEP_SNAPSHOTS).max(MAX_KEEP_SNAPSHOTS).default(cfg.keepSnapshots),
-      }), { base: { keepSnapshots: cfg.keepSnapshots } })
+        desktopShortcut: z.boolean().default(cfg.desktopShortcut),
+      }), { base: { keepSnapshots: cfg.keepSnapshots, desktopShortcut: cfg.desktopShortcut } })
       guardSettingsScope = scope
       // seed the settings document from config.json so the card matches the CLI
-      void scope.update({ keepSnapshots: cfg.keepSnapshots }).catch(() => {})
+      void scope.update({ keepSnapshots: cfg.keepSnapshots, desktopShortcut: cfg.desktopShortcut }).catch(() => {})
       // mirror every settings change back to config.json (CLI/boot-guard truth)
       scope.watch(() => {
         try {
           const v = scope.get()
           if (v && Number.isFinite(v.keepSnapshots)) setKeepSnapshots(v.keepSnapshots)
+          if (v && typeof v.desktopShortcut === 'boolean') setDesktopShortcutEnabled(v.desktopShortcut)
         } catch { /* best effort */ }
       })
       // Expose the namespace to the web configuration boundary; without this

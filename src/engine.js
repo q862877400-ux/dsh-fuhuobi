@@ -47,14 +47,29 @@ export function readGuardConfig() {
   try {
     cfg = JSON.parse(readFileSync(guardConfigPath(), 'utf8'))
   } catch { /* fallthrough */ }
-  const out = { keepSnapshots: DEFAULT_KEEP_SNAPSHOTS, port: DEFAULT_PORT }
+  const out = { keepSnapshots: DEFAULT_KEEP_SNAPSHOTS, port: DEFAULT_PORT, desktopShortcut: true }
   if (cfg && typeof cfg === 'object') {
     const n = Math.floor(Number(cfg.keepSnapshots))
     if (Number.isFinite(n) && n >= MIN_KEEP_SNAPSHOTS && n <= MAX_KEEP_SNAPSHOTS) out.keepSnapshots = n
     const p = Math.floor(Number(cfg.port))
     if (Number.isFinite(p) && p >= 1 && p <= 65535) out.port = p
+    if (typeof cfg.desktopShortcut === 'boolean') out.desktopShortcut = cfg.desktopShortcut
   }
   return out
+}
+
+/** Whether the plugin may create the desktop shortcut (default true). */
+export function desktopShortcutEnabled() {
+  return readGuardConfig().desktopShortcut !== false
+}
+
+/** Persist the desktop-shortcut toggle. Returns the stored value. */
+export function setDesktopShortcutEnabled(enabled) {
+  const next = enabled === true
+  writeGuardConfig({ ...readGuardConfig(), desktopShortcut: next })
+  // 关闭时顺手删除桌面上已存在的快捷方式（尊重"不想桌面被动"）
+  if (!next) removeReviveCoinShortcut()
+  return next
 }
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -610,10 +625,12 @@ export function markReviveCoin(profile) {
   // 3. 创建 DSH复活币X1.cmd
   writeReviveCoinCmd(profile)
 
-  // 4. 尝试创建桌面快捷方式
-  try {
-    createReviveCoinShortcut()
-  } catch { /* 无桌面权限时静默跳过 */ }
+  // 4. 尝试创建桌面快捷方式（尊重用户开关；未开启时静默跳过）
+  if (desktopShortcutEnabled()) {
+    try {
+      createReviveCoinShortcut()
+    } catch { /* 无桌面权限时静默跳过 */ }
+  }
 
   return { ok: true, stamp: newStamp, previous: coin.previous }
 }
@@ -688,6 +705,16 @@ export function createReviveCoinShortcut() {
     { encoding: 'utf8', timeout: 10000 },
   )
   // 忽略错误（无桌面权限等）
+}
+
+/**
+ * 删除桌面 DSH复活币X1.lnk 快捷方式（Windows 专用，用户关闭开关时调用）。
+ */
+export function removeReviveCoinShortcut() {
+  if (process.platform !== 'win32') return
+  const desktop = join(homedir(), 'Desktop')
+  const lnkPath = join(desktop, 'DSH复活币X1.lnk')
+  try { rmSync(lnkPath, { force: true }) } catch { /* best effort */ }
 }
 
 /**
