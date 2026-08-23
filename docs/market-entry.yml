@@ -1,0 +1,9 @@
+# dsh-bie-beng · 插件别崩！！ 收录条目（awesome-dsh-plugin / dsh-market）
+# PR 地址：https://github.com/awesome-dsh-plugin/awesome-dsh-plugin（data/plugins/q862877400-ux__dsh-bie-beng.yml）
+# 注意：仓库需 ≥1 天老（fork 2026-08-23 创建），PR gate 通过后每日刷新自动进 dsh-market
+url: https://github.com/q862877400-ux/dsh-bie-beng
+name: q862877400-ux/dsh-bie-beng
+category: dev
+description:
+  en: Install safety net for DeepSeek Harness: pre-install snapshots, guarded boot with auto-rollback, desktop one-click recovery, bad-plugin quarantine, and incident reports.
+  zh: 插件别崩！！装插件翻车？自动快照、启动体检、崩了自动回滚，桌面一键救回，坏插件自动隔离。
