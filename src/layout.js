@@ -44,6 +44,16 @@ export function guardConfigPath() {
   return join(guardDir(), 'config.json')
 }
 
+/** 复活币状态文件路径：记录当前 profile 的当前复活币与前次备份快照 stamp。 */
+export function reviveCoinPath() {
+  return join(guardDir(), 'revive-coin.json')
+}
+
+/** $DSH_HOME 下的 DSH复活币X1.cmd 路径，双击即可执行复活回滚。 */
+export function reviveCoinCmdPath() {
+  return join(dshHome(), 'DSH复活币X1.cmd')
+}
+
 /** Files captured by every snapshot (the complete install-state metadata).
  * cordis.yml is the profile composition root — MCP servers are added there as
  * dsh-mcp-client instances, so it must be snapshotted/restored too or a bad

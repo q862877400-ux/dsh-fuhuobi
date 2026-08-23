@@ -1,12 +1,12 @@
 {
-  "name": "dsh-plugin-guard",
+  "name": "dsh-fuhuobi",
   "version": "0.3.2",
-  "description": "Install safety net for DeepSeek Harness: pre-install snapshots, one-click/automatic rollback, guarded boot, and incident reports that auto-trigger agent analysis. DeepSeek Harness 插件安装安全网：安装前自动快照、一键/自动回退、守护启动、事故报告自动触发 Agent 分析。",
+  "description": "通过创建备份制造复活币，插件安装或启动失败时双击复活币一键恢复。",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lxzy-7/dsh-plugin-guard.git"
+    "url": "git+https://github.com/q862877400-ux/dsh-fuhuobi.git"
   },
-  "homepage": "https://github.com/lxzy-7/dsh-plugin-guard",
+  "homepage": "https://github.com/q862877400-ux/dsh-fuhuobi",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -15,7 +15,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-guard": "./scripts/guard-cli.js"
+    "dsh-fuhuobi": "./scripts/guard-cli.js"
   },
   "files": [
     "src",
@@ -37,13 +37,12 @@
   },
   "license": "MIT",
   "keywords": [
-    "deepseek-harness",
     "dsh",
-    "cordis",
-    "plugin",
+    "fuhuobi",
+    "复活币",
+    "backup",
     "rollback",
-    "snapshot",
-    "guard"
+    "deepseek-harness"
   ],
   "dsh": {
     "bundle": {

@@ -6,11 +6,12 @@ import {
   copyFileSync, rmSync, statSync, renameSync, lstatSync, readlinkSync,
 } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execSync } from 'node:child_process'
 import { join, dirname, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
 import yaml from 'js-yaml'
 import {
-  dshHome, profilesDir, profileDir, rollbacksRoot, guardDir, guardLogsDir, guardConfigPath, SNAPSHOT_FILES,
+  dshHome, profilesDir, profileDir, rollbacksRoot, guardDir, guardLogsDir, guardConfigPath, reviveCoinPath, reviveCoinCmdPath, SNAPSHOT_FILES,
 } from './layout.js'
 
 export const DEFAULT_KEEP_SNAPSHOTS = 10
@@ -551,6 +552,151 @@ export function cleanupStaleBundleLinks(profile) {
   }
   scan(nm, '')
   return removed
+}
+
+// ── 复活币引擎 ─────────────────────────────────────────────
+//
+// 三级旋转规则（每个 profile 独立）：
+//   1. 新快照 → 当前复活币（current）
+//   2. 旧 current → 前次备份（previous）
+//   3. 旧 previous → 删除
+// 永不超出 2 份复活币专用快照。
+
+/**
+ * 读取复活币状态文件。返回 { current: string|null, previous: string|null }。
+ * 文件不存在或异常时返回 null 值。
+ */
+export function readReviveCoin() {
+  try {
+    const raw = JSON.parse(readFileSync(reviveCoinPath(), 'utf8'))
+    return {
+      current: typeof raw.current === 'string' && raw.current !== '' ? raw.current : null,
+      previous: typeof raw.previous === 'string' && raw.previous !== '' ? raw.previous : null,
+    }
+  } catch {
+    return { current: null, previous: null }
+  }
+}
+
+/**
+ * 标记一枚新的复活币（三级旋转）：
+ * 1. 对指定 profile 做一次快照（tag=revive-coin）
+ * 2. 旧 current → previous，旧 previous → 删除
+ * 3. 新快照的 stamp 作为 current
+ * 4. 写入 revive-coin.json
+ * 5. 在 $DSH_HOME 下创建/更新 DSH复活币X1.cmd
+ * 6. 尝试在桌面创建快捷方式
+ */
+export function markReviveCoin(profile) {
+  // 1. 创建新快照
+  const snap = snapshotProfile(profile, { tag: 'revive-coin', reason: '复活币：成功启动自动存币', force: true })
+  if (snap.error) return { ok: false, error: snap.error }
+  const newStamp = snap.stamp
+
+  // 2. 三级旋转
+  const prev = readReviveCoin()
+  const oldPrevious = typeof prev.previous === 'string' ? prev.previous : null
+
+  // 如果有旧的 previous，删掉它对应的快照目录
+  if (oldPrevious) {
+    const oldDir = join(rollbacksRoot(profile), oldPrevious)
+    try { rmSync(oldDir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+
+  const coin = { current: newStamp, previous: prev.current }
+  mkdirSync(guardDir(), { recursive: true })
+  writeFileSync(reviveCoinPath(), `${JSON.stringify(coin, null, 2)}\n`, 'utf8')
+
+  // 3. 创建 DSH复活币X1.cmd
+  writeReviveCoinCmd(profile)
+
+  // 4. 尝试创建桌面快捷方式
+  try {
+    createReviveCoinShortcut()
+  } catch { /* 无桌面权限时静默跳过 */ }
+
+  return { ok: true, stamp: newStamp, previous: coin.previous }
+}
+
+/**
+ * 写入 $DSH_HOME/DSH复活币X1.cmd — 双击即可回滚到当前复活币快照。
+ */
+export function writeReviveCoinCmd(profile) {
+  const cmdPath = reviveCoinCmdPath()
+  const isWin = process.platform === 'win32'
+  const nodeCmd = isWin ? 'node.exe' : 'node'
+  const cliPath = join(guardDir(), '..', 'profiles', profile, 'node_modules', 'dsh-fuhuobi', 'scripts', 'guard-cli.js')
+
+  // Fallback: 尝试从 harness 根找
+  const fallbackCli = join(dirname(dshHome()), 'node_modules', 'dsh-fuhuobi', 'scripts', 'guard-cli.js')
+
+  const content = [
+    '@echo off',
+    'chcp 65001 >nul',
+    'echo.',
+    'echo ==============================================',
+    'echo        DSH 复活币 X1',
+    'echo  双击此文件可恢复 DSH 至上次成功启动状态',
+    'echo ==============================================',
+    'echo.',
+    '',
+    'set "CLI_PATH=%DSH_HOME%\\profiles\\web\\node_modules\\dsh-fuhuobi\\scripts\\guard-cli.js"',
+    'if not exist "%CLI_PATH%" set "CLI_PATH=%~dp0..\\node_modules\\dsh-fuhuobi\\scripts\\guard-cli.js"',
+    '',
+    'if exist "%CLI_PATH%" (',
+    '  node "%CLI_PATH%" revive-coin',
+    ') else (',
+    '  echo [DSH 复活币] 找不到 guard-cli.js，请确认 dsh-fuhuobi 已安装。',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'echo.',
+    'if %ERRORLEVEL% equ 0 (',
+    '  echo [DSH 复活币] 复活成功，请重启 DSH。',
+    ') else (',
+    '  echo [DSH 复活币] 复活失败，请查看上方错误信息。',
+    ')',
+    'echo.',
+    'pause',
+  ].join('\r\n')
+
+  mkdirSync(dirname(cmdPath), { recursive: true })
+  writeFileSync(cmdPath, content, 'utf8')
+}
+
+/**
+ * 在桌面创建 DSH复活币X1.lnk 快捷方式（Windows 专用）。
+ * 使用 PowerShell 的 COM 接口创建 .lnk。
+ */
+export function createReviveCoinShortcut() {
+  if (process.platform !== 'win32') return
+  const cmdPath = reviveCoinCmdPath()
+  const desktop = join(homedir(), 'Desktop')
+  const lnkPath = join(desktop, 'DSH复活币X1.lnk')
+
+  const psScript = [
+    `$ws = New-Object -ComObject WScript.Shell`,
+    `$sc = $ws.CreateShortcut('${lnkPath.replace(/'/g, "''")}')`,
+    `$sc.TargetPath = '${cmdPath.replace(/'/g, "''")}'`,
+    `$sc.Description = '双击使用复活币恢复 DSH 至上次成功启动状态'`,
+    `$sc.Save()`,
+  ].join('; ')
+
+  const result = spawnSync(
+    process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : 'powershell',
+    ['-NoProfile', '-NonInteractive', '-Command', psScript],
+    { encoding: 'utf8', timeout: 10000 },
+  )
+  // 忽略错误（无桌面权限等）
+}
+
+/**
+ * 解析当前复活币对应的快照目录。无复活币时返回 null。
+ */
+export function resolveReviveCoinSnapshot(profile) {
+  const coin = readReviveCoin()
+  if (!coin.current) return null
+  return resolveSnapshotDir(profile, { id: coin.current })
 }
 
 export { stamp, sha256File }
