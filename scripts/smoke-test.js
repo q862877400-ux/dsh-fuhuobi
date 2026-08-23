@@ -1,14 +1,15 @@
 // Smoke test: exercises the engine end-to-end against a throwaway DSH_HOME.
 // Run: node scripts/smoke-test.js
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const tmp = mkdtempSync(join(tmpdir(), 'dsh-guard-test-'))
+const tmp = mkdtempSync(join(tmpdir(), 'dsh-fuhuobi-test-'))
 process.env.DSH_HOME = join(tmp, '.dsh-home')
 
 const {
   snapshotProfile, listSnapshots, restoreSnapshot, resolveSnapshotDir, listProfiles,
+  markReviveCoin, readReviveCoin,
 } = await import('../src/engine.js')
 const { readPending, writePending, incidentSectionText, resolveIncidentMarker } = await import('../src/incident.js')
 const { pendingMarkerPath } = await import('../src/layout.js')
@@ -56,6 +57,21 @@ check('section text is empty without marker', (() => {
   resolveIncidentMarker()
   return incidentSectionText() === ''
 })())
+
+// --- 复活币三级旋转：1枚当前 + 1枚前次，第三次存币删除最旧
+const c1 = markReviveCoin('web')
+check('first revive coin marks a stamp', c1.ok === true && Boolean(c1.stamp), JSON.stringify(c1))
+let coin = readReviveCoin()
+check('revive coin file has current only', coin.current === c1.stamp && coin.previous === null, JSON.stringify(coin))
+const c2 = markReviveCoin('web')
+coin = readReviveCoin()
+check('second coin rotates: old current -> previous', coin.current === c2.stamp && coin.previous === c1.stamp, JSON.stringify(coin))
+const c3 = markReviveCoin('web')
+coin = readReviveCoin()
+check('third coin deletes the oldest (previous of previous)', coin.current === c3.stamp && coin.previous === c2.stamp, JSON.stringify(coin))
+// 被删除的快照目录不应再存在
+const goneDir = join(web, '..', '..', 'rollbacks', 'web', c1.stamp)
+check('oldest snapshot dir removed', !existsSync(goneDir), c1.stamp)
 
 // --- cleanup
 rmSync(tmp, { recursive: true, force: true })
