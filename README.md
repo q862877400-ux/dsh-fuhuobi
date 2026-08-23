@@ -1,3 +1,90 @@
+# dsh-plugin-guard（中文版）
+
+> DeepSeek Harness 的**插件安装安全网**：安装前自动快照、一键/自动回退、守护启动、事故报告自动触发 Agent 分析。
+> 本仓库为上游 [lxzy-7/dsh-plugin-guard](https://github.com/lxzy-7/dsh-plugin-guard) 的 fork，新增：**桌面回滚按钮自动生成脚本** + 中文文档。
+
+## 它解决什么问题
+
+一个坏插件能把 DSH 装到无法启动，手动修复通常要翻配置文件。本插件把整条链路自动化：
+
+```
+安装插件（任意方式）
+   │  进程内 tools.guard 钩子：安装前自动快照（不拦截安装）
+   ▼
+守护启动（boot-guard）
+   │  启动前再快照 → 启动 dsh web → 健康检查
+   ├─ 正常 ────────────────► 原样通过
+   └─ 异常 ──► 自动回滚到最近好快照 → 重试一次
+              → 仍失败 → 诊断坏插件并隔离（quarantine）→ 正常启动
+              → 写事故报告 + 标记 → 下次会话 Agent 自动分析
+终端 / DSH 崩溃时 → 双击桌面「DSH插件回滚」按钮（独立于 DSH）即可恢复
+```
+
+## 功能一览
+
+| 能力 | 说明 |
+| --- | --- |
+| 安装前快照 | `plugin_install / uninstall / toggle` 工具触发前自动快照所有 profile（从不拒绝安装） |
+| 守护启动 | `boot-guard` 脚本：启动前快照 → 健康检查（含 Web 渲染级检测）→ 失败自动回滚重试一次 |
+| 坏插件隔离 | v0.3.2：回滚与重试都失败时，从启动日志诊断坏插件 → 追加 `disabled: true` 隔离 → 报告被拉出的插件 |
+| 一键回滚 | `rollback.cmd`（Windows）/ CLI `dsh-guard rollback --good`，**DSH 崩溃时也可用** |
+| 桌面按钮 | **本 fork 新增**：`install-with-desktop-button.mjs` 自动在桌面生成固定名回滚按钮 |
+| 事故分析 | 启动失败自动写 incident 报告 + pending 标记，下次会话自动聚焦诊断 |
+| 快照保留 | 每 profile 保留最近 N 个（默认 10，可设 2–100），自动清理旧快照 |
+
+## 安装
+
+```sh
+# 从 GitHub 源码（本 fork）：
+dsh plugin --profile web add github:<你的用户名>/dsh-plugin-guard
+
+# 从 npm（上游发布后）：
+dsh plugin --profile web add dsh-plugin-guard
+```
+
+重启 `dsh web` 生效。
+
+**强烈建议启用守护启动**：用 `scripts/boot-guard.ps1`（Windows）或 `scripts/boot-guard.sh` 启动，而不是直接 `dsh web`。
+
+### 生成桌面回滚按钮（本 fork 新增）
+
+```sh
+node scripts/install-with-desktop-button.mjs --profile web
+# 可选：--pkg <spec> 先安装 guard；--desktop <dir> 指定按钮目录；--remove-button 删除按钮
+```
+
+完成后桌面出现固定名「DSH插件回滚.cmd」（覆盖式，只有一个）。**双击即回滚到最近一次好快照并重建依赖，DSH 崩没崩都能用**。
+
+## 使用
+
+- **Web 设置 → 备份管理**：查看/创建快照、设置保留数量
+- **Agent 工具**：`dsh_snapshot` / `dsh_rollback` / `incident_resolved`
+- **CLI**（DSH 故障时可用）：`dsh-guard snapshot|list|rollback|keep|health|incident|resolve|profiles`
+
+## 配置
+
+`$DSH_HOME/guard/config.json`（可选）：
+
+```json
+{ "keepSnapshots": 10, "port": 3080 }
+```
+
+## 与上游的差异（本 fork）
+
+1. **新增** `scripts/install-with-desktop-button.mjs`：一键安装 + 桌面固定按钮自动生成（读注册表定位桌面，OneDrive 重定向兼容，回退到 `%USERPROFILE%\Desktop` / 当前工作目录）
+2. **新增** 中文文档（本文件前半部分）
+3. 其余引擎逻辑与上游一致（快照/回滚/守护/隔离/事故报告）
+
+## 许可证
+
+MIT
+
+---
+
+# 以下为上游英文文档
+
+---
+
 # dsh-plugin-guard
 
 > Install safety net for [DeepSeek Harness](https://github.com/deepseek-ai/dsh): pre-install snapshots, one-click / automatic rollback, guarded boot, and incident reports that auto-trigger agent analysis.

@@ -27,7 +27,8 @@
   ],
   "scripts": {
     "test": "node scripts/smoke-test.js",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "desktop-button": "node scripts/install-with-desktop-button.mjs"
   },
   "publishConfig": {
     "access": "public"
