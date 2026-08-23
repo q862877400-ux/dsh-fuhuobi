@@ -1,15 +1,14 @@
-// Model tools registered by the guard plugin.
+// 复活币插件注册的模型工具。
 //
-// Fully self-contained: the tool descriptors are plain objects (name /
-// description / parameters / output.schema / output.render / execute) — the
-// exact shape @deepseek-ai/dsh-tools#defineTool produces for these simple
-// JSON-Schema definitions (the harness's LLM adapters and tool registry read
-// those fields directly). We build them inline so this plugin has ZERO
-// runtime dependencies and loads on any dsh install regardless of how pnpm
-// lays out node_modules (no @deepseek-ai/dsh-tools, no its peer chain).
+// 完全自包含：工具描述是普通对象（name / description / parameters /
+// output.schema / output.render / execute），与 @deepseek-ai/dsh-tools
+// #defineTool 对这类简单 JSON-Schema 定义产出的形状完全一致（harness 的
+// LLM 适配器与工具注册表直接读这些字段）。内联构建让本插件零运行时依赖，
+// 在任何 dsh 安装下都能加载，不依赖 pnpm 的 node_modules 布局。
 import {
   listProfiles, snapshotProfile, snapshotAll, listSnapshots,
   resolveSnapshotDir, restoreSnapshot, resolveGuardPort,
+  markReviveCoin, readReviveCoin,
 } from './engine.js'
 import {
   readPending, resolveIncidentMarker, buildIncidentReport, health,
@@ -104,7 +103,7 @@ export function createGuardTools() {
   return [
     defineTool({
       name: 'incident_resolved',
-      description: '在事故报告已被分析、且(尽可能)修复完成后，把待处理的 DSH 事故标记为已处理。该工具会改名为"已解决"标记，让后续会话不再收到事故警报。\nMark the pending DSH incident as resolved after the incident report has been analyzed and (when possible) fixed. Renames the pending marker so future sessions stop receiving the incident alert.',
+      description: '在事故报告已被分析、且(尽可能)修复完成后，把待处理的 DSH 事故标记为已处理。该工具会把"待处理"标记改名为"已解决"，让后续会话不再收到事故警报。',
       parameters: {},
       output: {
         schema: {
@@ -124,12 +123,12 @@ export function createGuardTools() {
 
     defineTool({
       name: 'dsh_snapshot',
-      description: '对某个(或所有) profile 的安装状态做一次快照备份(备份 package.json、锁文件、pnpm-workspace.yaml、cordis.patch.yml 四个文件)，之后可用 dsh_rollback 还原到该快照。\nSnapshot the install state (package.json, lockfile, pnpm-workspace.yaml, cordis.patch.yml) of one profile or every profile, so a later dsh_rollback can restore it.',
+      description: '对某个(或所有) profile 的安装状态做一次快照备份(备份 package.json、锁文件、pnpm-workspace.yaml、cordis.patch.yml 四个文件)，之后可用 dsh_rollback 还原到该快照。',
       parameters: {
-        profile: { type: 'string', description: 'profile 名称；不填则对所有 profile 备份。/ Profile name; omit to snapshot every profile.' },
-        tag: { type: 'string', description: '记录到清单里的可选标签(如 manual/安装前/回退前)。/ Optional label recorded in the snapshot manifest.' },
-        reason: { type: 'string', description: '记录到清单里的可选原因说明。/ Optional reason text recorded in the manifest.' },
-        force: { type: 'boolean', description: '即使与最新快照内容完全一致也强制生成一份(默认会去重跳过)。/ Pin this state even when identical to the newest snapshot.' },
+        profile: { type: 'string', description: 'profile 名称；不填则对所有 profile 备份。' },
+        tag: { type: 'string', description: '记录到清单里的可选标签(如 manual/安装前/回退前)。' },
+        reason: { type: 'string', description: '记录到清单里的可选原因说明。' },
+        force: { type: 'boolean', description: '即使与最新快照内容完全一致也强制生成一份(默认会去重跳过)。' },
       },
       output: {
         schema: {
@@ -154,19 +153,19 @@ export function createGuardTools() {
 
     defineTool({
       name: 'dsh_rollback',
-      description: '查看或还原 DSH profile 的快照：列出快照、把 profile 回滚到某个快照(或最近的"良好"快照)、报告运行环境健康状况、或生成事故定位报告。\nInspect or restore DSH profile snapshots: list snapshots, roll back a profile to a snapshot (or to the last good one), report harness health, or build an incident report.',
+      description: '查看或还原 DSH profile 的快照：列出快照、把 profile 回滚到某个快照(或最近的"良好"快照)、报告运行环境健康状况、或生成事故定位报告。',
       parameters: {
         action: {
           type: 'string',
           required: true,
           enum: ['list', 'rollback', 'status', 'incident'],
-          description: 'list = 列出快照；rollback = 还原文件并重跑 pnpm install --frozen-lockfile；status = 运行环境健康状态 + 待处理事故；incident = 生成事故定位报告(并设置待处理标记)。\nlist = show snapshots; rollback = restore files and run pnpm install --frozen-lockfile; status = harness health + pending incident; incident = write a problem-localization report (and set the pending marker).',
+          description: 'list = 列出快照；rollback = 还原文件并重跑 pnpm install --frozen-lockfile；status = 运行环境健康状态 + 待处理事故；incident = 生成事故定位报告(并设置待处理标记)。',
         },
-        profile: { type: 'string', description: 'list/rollback 作用的 profile 名称(默认 web)。/ Profile name for list/rollback (default: web).' },
-        snapshotId: { type: 'string', description: '快照 stamp 或前缀；不填且 good=true 时用最近一份"良好"快照。/ Snapshot stamp or prefix; omit with good=true for the last good snapshot.' },
-        good: { type: 'boolean', description: '回滚到未标记 pre-boot/pre-rollback 的最新快照(未给 snapshotId 时的默认行为)。/ Roll back to the newest snapshot not tagged pre-boot/pre-rollback (default when no snapshotId).' },
-        skipInstall: { type: 'boolean', description: '只还原配置文件，不运行 pnpm install。/ Restore config files without running pnpm install.' },
-        kind: { type: 'string', description: 'action=incident 时的事故类型(默认 manual)。/ Incident kind for action=incident (default: manual).' },
+        profile: { type: 'string', description: 'list/rollback 作用的 profile 名称(默认 web)。' },
+        snapshotId: { type: 'string', description: '快照 stamp 或前缀；不填且 good=true 时用最近一份"良好"快照。' },
+        good: { type: 'boolean', description: '回滚到未标记 pre-boot/pre-rollback 的最新快照(未给 snapshotId 时的默认行为)。' },
+        skipInstall: { type: 'boolean', description: '只还原配置文件，不运行 pnpm install。' },
+        kind: { type: 'string', description: 'action=incident 时的事故类型(默认 manual)。' },
       },
       output: {
         schema: {
