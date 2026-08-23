@@ -1,7 +1,7 @@
 {
   "name": "dsh-fuhuobi",
   "version": "0.3.3",
-  "description": "通过创建备份制造复活币，插件安装或启动失败时双击复活币一键恢复。",
+  "description": "通过创建备份制造复活币，插件安装或启动失败时双击复活币一键恢复；与桌面启动器自动对接，守护启动自动存币。",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/q862877400-ux/dsh-fuhuobi.git"

@@ -10,7 +10,6 @@
 //   dsh-fuhuobi incident [--kind K] [--no-marker]
 //   dsh-fuhuobi resolve
 //   dsh-fuhuobi revive-coin [--profile X]   (查看/手动存一枚复活币)
-//   dsh-fuhuobi launcher-guard               (把桌面启动器整合为守护启动)
 //   dsh-fuhuobi profiles
 import {
   listProfiles, snapshotProfile, snapshotAll, listSnapshots,
@@ -21,9 +20,6 @@ import {
 import {
   readPending, resolveIncidentMarker, buildIncidentReport, health, writeQuarantineMarker,
 } from '../src/incident.js'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
 
 function parseArgs(argv) {
   const opts = { _: [] }
@@ -61,7 +57,6 @@ const USAGE = `dsh-fuhuobi: DSH 复活币 / 安装回滚安全网
   incident [--kind K] [--no-marker]                          生成事故定位报告
   resolve                                                   标记待处理事故为已解决
   revive-coin [--profile X] [--mark]                         查看/手动存一枚复活币
-  launcher-guard                                           把桌面启动器整合为守护启动
   quarantine --diagnose                                     从启动日志识别导致失败的问题插件
   quarantine --plugin <id> [--undo]                         隔离(禁用) / 恢复一个插件
   quarantine --list                                         列出已隔离插件
@@ -207,82 +202,6 @@ async function main() {
       console.log(`  前次备份:   ${coin.previous ?? '(无)'}`)
       console.log(`  可恢复快照: ${snap ?? '(无)'}`)
       console.log('  双击 $DSH_HOME/DSH复活币X1.cmd 即可复活。')
-      return 0
-    }
-    case 'launcher-guard': {
-      // 把 dsh-desktop-launcher 生成的 launcher.ps1 整合为守护启动：
-      // 裸 `dsh web` 启动段替换为调用 boot-guard.ps1（启动前快照 → 健康检查
-      // → 成功自动存复活币 / 失败自动回滚重试）。保留原逻辑作为 boot-guard
-      // 缺失时的回退，插件卸载后桌面启动器仍可用。
-      const home = process.env.DSH_HOME && process.env.DSH_HOME.trim() !== '' ? process.env.DSH_HOME.trim() : join(homedir(), '.dsh')
-      const launcherPath = join(home, 'desktop-launcher', 'launcher.ps1')
-      if (!existsSync(launcherPath)) {
-        console.error('未找到桌面启动器 launcher.ps1。')
-        console.error('请先在 Web UI 设置 → 插件配置 → 桌面启动器 中点击「创建桌面图标」，再运行本命令。')
-        return 1
-      }
-      let text = ''
-      try { text = readFileSync(launcherPath, 'utf8') } catch { text = '' }
-      if (text.includes('dsh-fuhuobi-guarded-launch')) {
-        console.log('桌面启动器已经是守护启动版本，无需重复整合。')
-        return 0
-      }
-      // 定位裸启动段：`$arguments = @('web')` 到 else 分支完整结束
-      const startMarker = "$arguments = @('web')"
-      const startIdx = text.indexOf(startMarker)
-      if (startIdx === -1) {
-        console.error('launcher.ps1 结构与预期不符，未找到启动段（可能版本不同）。请手动检查。')
-        return 1
-      }
-      // 裸启动行（else 分支内）作为替换锚点
-      const fallbackMarker = "  Start-Process -FilePath $command.Source -ArgumentList $arguments -WindowStyle Hidden"
-      const fallbackIdx = text.indexOf(fallbackMarker, startIdx)
-      if (fallbackIdx === -1) {
-        console.error('launcher.ps1 结构与预期不符，未找到裸启动行（可能版本不同）。请手动检查。')
-        return 1
-      }
-      // 裸启动行之后紧跟 else 分支收尾 `}`（独占一行），一起吞掉
-      const afterBrace = text.indexOf('\n}', fallbackIdx + fallbackMarker.length)
-      let cutEnd = fallbackIdx + fallbackMarker.length
-      if (afterBrace !== -1 && afterBrace < fallbackIdx + fallbackMarker.length + 80) {
-        cutEnd = afterBrace + 2 // 包含 '\n}' 的收尾大括号
-      }
-      const before = text.slice(0, startIdx)
-      const after = text.slice(cutEnd)
-      const guarded = [
-        before,
-        "$arguments = @('web')",
-        "if ($profile -ne '') {",
-        "  $arguments += @('--profile', $profile)",
-        '}',
-        '',
-        '# ===== dsh-fuhuobi-guarded-launch =====',
-        '# 整合：桌面启动器改为守护启动（boot-guard.ps1）',
-        '$bootGuard = Join-Path $env:DSH_HOME "profiles\\web\\node_modules\\dsh-fuhuobi\\scripts\\boot-guard.ps1"',
-        "if (Test-Path $bootGuard) {",
-        "  $guardArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $bootGuard)",
-        "  if ($profile -ne '') { $guardArgs += @('-Profile', $profile) }",
-        "  Start-Process -FilePath 'powershell.exe' -ArgumentList $guardArgs -WindowStyle Hidden",
-        '} else {',
-        "  # 回退：boot-guard 不存在（插件已卸载）时走普通启动",
-        "  if ($command.CommandType -eq 'ExternalScript' -or $command.Source -match '\\.ps1$') {",
-        "    $arguments = @('-NoProfile', '-File', $command.Source) + $arguments",
-        "    Start-Process -FilePath 'powershell.exe' -ArgumentList $arguments -WindowStyle Hidden",
-        '  } else {',
-        '    Start-Process -FilePath $command.Source -ArgumentList $arguments -WindowStyle Hidden',
-        '  }',
-        '}',
-      ].join('\n')
-      const next = guarded + after
-      try {
-        writeFileSync(launcherPath, next, 'utf8')
-      } catch (e) {
-        console.error(`写入 launcher.ps1 失败: ${e.message}`)
-        return 1
-      }
-      console.log(`✅ 已整合守护启动: ${launcherPath}`)
-      console.log('桌面图标现在会通过 boot-guard 启动：启动前快照 → 健康检查 → 成功自动存复活币 / 失败自动回滚。')
-      console.log('（插件卸载后自动回退为普通启动，桌面图标仍可用。）')
       return 0
     }
     case 'status': {

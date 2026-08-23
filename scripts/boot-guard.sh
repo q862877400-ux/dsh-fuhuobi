@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# boot-guard.sh — guarded boot for DeepSeek Harness (macOS/Linux).
+# boot-guard.sh - guarded boot for DeepSeek Harness (macOS/Linux).
 #
 # Snapshots every profile, starts `dsh web`, health-checks it, and on failure
 # kills the server, rolls back to the last good snapshot and retries once.
@@ -73,7 +73,7 @@ log "started server (pgid $PID)"
 if wait_healthy "$FIRST_WAIT_SEC"; then
   log "boot ok on first attempt"
   set_status OK first-attempt
-  # 两阶段健康检查通过：自动存一枚复活币（三级旋转）。
+  # Two-phase health check passed: auto-mint a revival coin (3-level rotation).
   guard revive-coin --mark
   # Stay attached so launchers that kill the process group on window close
   # keep their close-to-quit semantics.
@@ -100,9 +100,9 @@ guard incident --kind boot-failure
 
 echo ""
 echo "=================================================="
-echo " [DSH 复活币] 启动失败！"
-echo " 请双击桌面或 DSH 根目录的「DSH复活币X1」恢复，"
-echo " 或运行: dsh-fuhuobi revive-coin"
+echo " [DSH Revival Coin] Boot failed!"
+echo " Double-click DSHReviveCoinX1.cmd on the desktop or in the DSH root,"
+echo " or run: dsh-fuhuobi revive-coin"
 echo "=================================================="
 echo ""
 

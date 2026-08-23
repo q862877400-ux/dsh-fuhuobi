@@ -27,6 +27,17 @@ dsh plugin --profile web add dsh-fuhuobi
 
 **强烈推荐用守护启动**（`scripts/boot-guard.ps1` Windows / `scripts/boot-guard.sh` macOS/Linux）替代直接启动——只有守护启动才会自动存复活币。
 
+## 与桌面启动器兼容（dsh-desktop-launcher）
+
+如果你同时装了 `@linxin666/dsh-web-ui-all`（全家桶，内含桌面启动器），本插件会自动与它对接：
+
+- 安装本插件后，桌面启动器的「dsh 命令」会被自动指向 `scripts/guard-launcher.ps1`（配置覆盖，不改动 dsh-desktop-launcher 的任何文件）。
+- 之后点击桌面的 DSH 图标 = **守护启动**：启动前快照 → 两阶段健康检查 → 成功自动存复活币 / 失败自动回滚重试。
+- 只有本插件、没有桌面启动器时，覆盖静默失效，无任何副作用。
+- 卸载本插件后，桌面启动器自动回到普通启动，桌面图标仍可用。
+
+如果你不想让桌面图标走守护启动，在 设置 → 桌面启动器 里把「dsh 命令」改回 `dsh` 即可（配置覆盖会被你的手动值取代）。
+
 ## 复活币机制
 
 ### 三级旋转
@@ -176,6 +187,17 @@ dsh plugin --profile web add dsh-fuhuobi
 Restart `dsh web`. This is a standard **bundle plugin**: it joins the profile layer stack and takes effect automatically.
 
 **Guarded boot is strongly recommended** (`scripts/boot-guard.ps1` on Windows / `scripts/boot-guard.sh` on macOS/Linux) instead of launching directly — only guarded boot mints the revival coin automatically.
+
+## Compatibility with the Desktop Launcher (dsh-desktop-launcher)
+
+If you also have `@linxin666/dsh-web-ui-all` installed (the all-in-one bundle that ships the desktop launcher), this plugin integrates with it automatically:
+
+- The launcher's **"dsh command"** setting is automatically pointed at `scripts/guard-launcher.ps1` (a config override — no file of dsh-desktop-launcher is touched).
+- After that, clicking the DSH icon on your desktop = **guarded boot**: pre-boot snapshot → two-phase health check → auto-mint a revival coin on success / auto-rollback and retry on failure.
+- Without the desktop launcher installed, the override silently no-ops — zero side effects.
+- After uninstalling this plugin, the desktop launcher falls back to a plain start; the icon keeps working.
+
+To opt out, set **"dsh command"** back to `dsh` in 设置 → 桌面启动器 (your manual value replaces the override).
 
 ## How the Revival Coin Works
 

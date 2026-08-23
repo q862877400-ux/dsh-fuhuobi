@@ -184,7 +184,7 @@ if ($boot -eq "ok") {
     if ($render -eq "ok") {
         Log "boot ok on first attempt"
         Set-Status "OK" "first-attempt"
-        # 两阶段健康检查通过：自动存一枚复活币（三级旋转）。
+        # Two-phase health check passed: auto-mint a revival coin (3-level rotation).
         $null = Invoke-Guard @("revive-coin", "--mark")
         Wait-Process -Id $proc.Id
         Log "server tree exited; boot guard done"
@@ -234,7 +234,7 @@ if ($retry -eq "ok") {
         }
         if ($qBoot -eq "ok") {
             Log "boot ok after quarantining $culprit"
-            Set-Status "QUARANTINED" ("$culprit 与当前 DSH 不兼容: 回滚无法解决, 已禁用并正常启动")
+            Set-Status "QUARANTINED" ("$culprit incompatible with current DSH: rollback cannot fix it; disabled and booting without it")
             Wait-Process -Id $proc3.Id
             Log "server tree exited; boot guard done (plugin quarantined)"
             exit 0
@@ -249,12 +249,13 @@ if ($retry -eq "ok") {
 
 $null = Invoke-Guard @("incident", "--kind", "boot-failure")
 
-# 启动彻底失败：CLI 提示用复活币恢复（网页打不开时的第 ③ 路线）。
+# Boot failed completely: CLI hint to revive via the revival coin (route 3,
+# for when the web page cannot open at all). ASCII only (PS 5.1, no BOM).
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor DarkYellow
-Write-Host " [DSH 复活币] 启动失败！" -ForegroundColor Red
-Write-Host " 请双击桌面或 DSH 根目录的「DSH复活币X1」恢复，" -ForegroundColor Yellow
-Write-Host " 或运行: dsh-fuhuobi revive-coin" -ForegroundColor Yellow
+Write-Host " [DSH Revival Coin] Boot failed!" -ForegroundColor Red
+Write-Host " Double-click DSHReviveCoinX1.cmd on the desktop or in the DSH" -ForegroundColor Yellow
+Write-Host " root, or run: dsh-fuhuobi revive-coin" -ForegroundColor Yellow
 Write-Host "==================================================" -ForegroundColor DarkYellow
 Write-Host ""
 
