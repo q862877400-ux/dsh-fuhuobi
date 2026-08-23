@@ -43,9 +43,9 @@ if (-not $env:DSH_HOME -or $env:DSH_HOME.Trim() -eq "") {
 }
 
 # Locate the guard CLI shipped inside the installed package.
-$cli = Join-Path $env:DSH_HOME ("profiles\" + $Profile + "\node_modules\dsh-plugin-guard\scripts\guard-cli.js")
+$cli = Join-Path $env:DSH_HOME ("profiles\" + $Profile + "\node_modules\dsh-fuhuobi\scripts\guard-cli.js")
 if (-not (Test-Path $cli)) {
-    $cli = Join-Path $HarnessRoot "node_modules\dsh-plugin-guard\scripts\guard-cli.js"
+    $cli = Join-Path $HarnessRoot "node_modules\dsh-fuhuobi\scripts\guard-cli.js"
 }
 
 $logDir = Join-Path $env:DSH_HOME "guard\logs"
@@ -115,9 +115,9 @@ function Stop-ServerTree($p) {
 }
 
 function Test-RenderReady([int]$seconds) {
-    # After HTTP is up, confirm the web client actually rendered. The guard
-    # client POSTs /guard/api/booted on a successful root mount and
-    # /guard/api/render-error on a root render crash (rc.7 "page opens but
+    # After HTTP is up, confirm the web client actually rendered. The fuhuobi
+    # client POSTs /fuhuobi/api/booted on a successful root mount and
+    # /fuhuobi/api/render-error on a root render crash (rc.7 "page opens but
     # black screen with an error"). HTTP / alone cannot tell these apart.
     # - JSON with renderError true  -> "rendercrash" (roll back)
     # - JSON with booted true       -> "ok" (client really rendered)
@@ -132,7 +132,7 @@ function Test-RenderReady([int]$seconds) {
     while ((Get-Date) -lt $deadline) {
         $resp = $null
         try {
-            $resp = Invoke-WebRequest -Uri ("http://127.0.0.1:" + $Port + "/guard/api/render-error") -TimeoutSec 2 -UseBasicParsing
+            $resp = Invoke-WebRequest -Uri ("http://127.0.0.1:" + $Port + "/fuhuobi/api/render-error") -TimeoutSec 2 -UseBasicParsing
         } catch {
             $status = $_.Exception.Response.StatusCode
             if ($status -eq [System.Net.HttpStatusCode]::NotFound) { return "ok" }
@@ -184,6 +184,8 @@ if ($boot -eq "ok") {
     if ($render -eq "ok") {
         Log "boot ok on first attempt"
         Set-Status "OK" "first-attempt"
+        # 两阶段健康检查通过：自动存一枚复活币（三级旋转）。
+        $null = Invoke-Guard @("revive-coin", "--mark")
         Wait-Process -Id $proc.Id
         Log "server tree exited; boot guard done"
         exit 0
@@ -210,6 +212,7 @@ if ($retry -eq "ok") {
 }
 if ($retry -eq "ok") {
     Set-Status "OK" "rolled-back-retry"
+    $null = Invoke-Guard @("revive-coin", "--mark")
 } else {
     Stop-ServerTree $proc2
     Set-Status "FAILED" ("boot-failed (" + $retry + ")")
@@ -245,6 +248,15 @@ if ($retry -eq "ok") {
 }
 
 $null = Invoke-Guard @("incident", "--kind", "boot-failure")
+
+# 启动彻底失败：CLI 提示用复活币恢复（网页打不开时的第 ③ 路线）。
+Write-Host ""
+Write-Host "==================================================" -ForegroundColor DarkYellow
+Write-Host " [DSH 复活币] 启动失败！" -ForegroundColor Red
+Write-Host " 请双击桌面或 DSH 根目录的「DSH复活币X1」恢复，" -ForegroundColor Yellow
+Write-Host " 或运行: dsh-fuhuobi revive-coin" -ForegroundColor Yellow
+Write-Host "==================================================" -ForegroundColor DarkYellow
+Write-Host ""
 
 if ($retry -eq "ok") { Wait-Process -Id $proc2.Id; Log "server tree exited; boot guard done"; exit 0 }
 exit 1
