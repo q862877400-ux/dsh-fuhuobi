@@ -644,7 +644,7 @@ export function writeReviveCoinCmd(profile) {
     'if not exist "%CLI_PATH%" set "CLI_PATH=%~dp0..\\node_modules\\dsh-fuhuobi\\scripts\\guard-cli.js"',
     '',
     'if exist "%CLI_PATH%" (',
-    '  node "%CLI_PATH%" revive-coin',
+    '  node "%CLI_PATH%" revive-coin --use',
     ') else (',
     '  echo [DSH 复活币] 找不到 guard-cli.js，请确认 dsh-fuhuobi 已安装。',
     '  pause',
