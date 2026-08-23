@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-// dsh-guard — standalone CLI for the guard engine. Works without the harness
-// (this is the tool you use when the app cannot start).
+// dsh-fuhuobi — 复活币独立命令行。不依赖 harness 也能用（应用起不来时
+// 就靠它）。
 //
-//   dsh-guard snapshot [--profile X] [--tag T] [--reason R] [--force]
-//   dsh-guard list     [--profile X]
-//   dsh-guard rollback [--profile X] [--id I | --good] [--skip-install]
-//   dsh-guard keep     [N]            (show, or set the per-profile cap, min 2)
-//   dsh-guard health   [--port N]
-//   dsh-guard incident [--kind K] [--no-marker]
-//   dsh-guard resolve
-//   dsh-guard profiles
+//   dsh-fuhuobi snapshot [--profile X] [--tag T] [--reason R] [--force]
+//   dsh-fuhuobi list     [--profile X]
+//   dsh-fuhuobi rollback [--profile X] [--id I | --good] [--skip-install]
+//   dsh-fuhuobi keep     [N]            (查看或设置每个 profile 保留快照数，最少 2)
+//   dsh-fuhuobi health   [--port N]
+//   dsh-fuhuobi incident [--kind K] [--no-marker]
+//   dsh-fuhuobi resolve
+//   dsh-fuhuobi revive-coin [--profile X]   (查看/手动存一枚复活币)
+//   dsh-fuhuobi profiles
 import {
   listProfiles, snapshotProfile, snapshotAll, listSnapshots,
   resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, resolveGuardPort,
   profilePluginRows, diagnoseCulprit, quarantinePlugin, unquarantinePlugin, readQuarantines,
+  markReviveCoin, readReviveCoin, resolveReviveCoinSnapshot,
 } from '../src/engine.js'
 import {
   readPending, resolveIncidentMarker, buildIncidentReport, health, writeQuarantineMarker,
@@ -33,6 +35,8 @@ function parseArgs(argv) {
     else if (a === '--good') opts.good = true
     else if (a === '--skip-install') opts.skipInstall = true
     else if (a === '--no-marker') opts.noMarker = true
+    else if (a === '--mark') opts.mark = true
+    else if (a === '--use') opts.use = true
     else if (a === '--plugin') opts.plugin = argv[++i]
     else if (a === '--undo') opts.undo = true
     else if (a === '--diagnose') opts.diagnose = true
@@ -43,7 +47,7 @@ function parseArgs(argv) {
   return opts
 }
 
-const USAGE = `dsh-guard: DeepSeek Harness 安装/回滚安全网
+const USAGE = `dsh-fuhuobi: DSH 复活币 / 安装回滚安全网
   命令(可用 --profile / --tag / --reason / --force / --id / --good / --skip-install / --kind / --port 等参数):
   snapshot [--profile X] [--tag T] [--reason R] [--force]   手动快照
   list     [--profile X]                                     列出快照
@@ -52,6 +56,7 @@ const USAGE = `dsh-guard: DeepSeek Harness 安装/回滚安全网
   health   [--port N]                                        检查后端健康状态
   incident [--kind K] [--no-marker]                          生成事故定位报告
   resolve                                                   标记待处理事故为已解决
+  revive-coin [--profile X] [--mark]                         查看/手动存一枚复活币
   quarantine --diagnose                                     从启动日志识别导致失败的问题插件
   quarantine --plugin <id> [--undo]                         隔离(禁用) / 恢复一个插件
   quarantine --list                                         列出已隔离插件
@@ -136,7 +141,7 @@ async function main() {
       }
       const n = Number(arg)
       if (!Number.isFinite(n)) {
-        console.error('用法: dsh-guard keep <N>')
+        console.error('用法: dsh-fuhuobi keep <N>')
         return 2
       }
       const v = setKeepSnapshots(n)
@@ -160,6 +165,44 @@ async function main() {
       const out = resolveIncidentMarker()
       console.log(out.result)
       return out.report ? 0 : 1
+    }
+    case 'revive-coin': {
+      const profile = opts.profile ?? 'web'
+      if (opts.mark === true) {
+        const r = markReviveCoin(profile)
+        if (!r.ok) { console.error(`存复活币失败: ${r.error}`); return 1 }
+        console.log(`复活币已存入: ${r.stamp} (前次备份: ${r.previous ?? '无'})`)
+        console.log('桌面/DSH 根目录的 DSH复活币X1 已更新。')
+        return 0
+      }
+      if (opts.use === true) {
+        // 双击 DSH复活币X1.cmd 走这里：回滚到当前复活币快照。
+        const snap = resolveReviveCoinSnapshot(profile)
+        if (!snap) {
+          console.error('没有可用的复活币快照。请先成功启动一次 DSH 自动存币，或运行 dsh-fuhuobi revive-coin --mark 手动存币。')
+          return 1
+        }
+        console.log(`使用复活币恢复 ${profile} -> ${snap.split(/[\\/]/).at(-1)}`)
+        const { pnpm, removedLinks } = restoreSnapshot(profile, snap, { skipInstall: opts.skipInstall === true })
+        if (pnpm !== null && !pnpm.ok) {
+          console.error(`pnpm 失败(退出码 ${pnpm.status}): ${pnpm.output}`)
+          console.error('配置文件已还原; 待 pnpm/网络可用后请手动运行 pnpm install --frozen-lockfile。')
+          return 1
+        }
+        console.log('复活成功！请重启 DSH。')
+        if (removedLinks && removedLinks.length > 0) {
+          console.log(`已清理残留的 bundle 链接: ${removedLinks.join(', ')}`)
+        }
+        return 0
+      }
+      const coin = readReviveCoin()
+      const snap = coin.current ? resolveReviveCoinSnapshot(profile) : null
+      console.log(`复活币状态 (profile ${profile}):`)
+      console.log(`  当前复活币: ${coin.current ?? '(无)'}`)
+      console.log(`  前次备份:   ${coin.previous ?? '(无)'}`)
+      console.log(`  可恢复快照: ${snap ?? '(无)'}`)
+      console.log('  双击 $DSH_HOME/DSH复活币X1.cmd 即可复活。')
+      return 0
     }
     case 'status': {
       const port = opts.port ?? resolveGuardPort()
@@ -185,7 +228,7 @@ async function main() {
         return 0
       }
       const id = opts.plugin
-      if (!id) { console.error('用法: dsh-guard quarantine --plugin <id> [--undo] | --diagnose | --list'); return 2 }
+      if (!id) { console.error('用法: dsh-fuhuobi quarantine --plugin <id> [--undo] | --diagnose | --list'); return 2 }
       if (opts.undo === true) {
         unquarantinePlugin(profile, id)
         const p = readPending()
@@ -214,6 +257,6 @@ async function main() {
 main().then((code) => {
   process.exitCode = code
 }).catch((error) => {
-  console.error(`dsh-guard 执行失败: ${error.message}`)
+  console.error(`dsh-fuhuobi 执行失败: ${error.message}`)
   process.exitCode = 1
 })
