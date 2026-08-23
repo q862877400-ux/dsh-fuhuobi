@@ -15,7 +15,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "dsh-fuhuobi": "./scripts/guard-cli.js"
+    "dsh-fuhuobi": "scripts/guard-cli.js"
   },
   "files": [
     "src",
