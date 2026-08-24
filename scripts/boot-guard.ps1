@@ -171,8 +171,6 @@ function Confirm-RenderReady {
 Log "=== boot guard start ==="
 if (Test-Health) { Log "already healthy"; Set-Status "OK" "already-running"; exit 0 }
 
-$null = Invoke-Guard @("snapshot", "--tag", "pre-boot", "--reason", "automatic snapshot before boot")
-
 $proc = Start-Server $serverOut $serverErr
 Log "started server (pid $($proc.Id))"
 $boot = Wait-Healthy $FirstWaitSec $proc

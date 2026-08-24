@@ -25,18 +25,11 @@ dsh plugin --profile web add dsh-fuhuobi
 
 重启 `dsh web`。这是标准 **bundle 插件**：加入 profile 层栈自动生效。
 
-**强烈推荐用守护启动**（`scripts/boot-guard.ps1` Windows / `scripts/boot-guard.sh` macOS/Linux）替代直接启动——只有守护启动才会自动存复活币。
+**强烈推荐用守护启动**（`scripts/boot-guard.ps1` Windows / `scripts/boot-guard.sh` macOS/Linux）替代直接启动——守护启动会做健康检查并在失败时自动回滚。
 
 ## 与桌面启动器兼容（dsh-desktop-launcher）
 
-如果你同时装了 `@linxin666/dsh-web-ui-all`（全家桶，内含桌面启动器），本插件会自动与它对接：
-
-- 安装本插件后，桌面启动器的「dsh 命令」会被自动指向 `scripts/guard-launcher.ps1`（配置覆盖，不改动 dsh-desktop-launcher 的任何文件）。
-- 之后点击桌面的 DSH 图标 = **守护启动**：启动前快照 → 两阶段健康检查 → 成功自动存复活币 / 失败自动回滚重试。
-- 只有本插件、没有桌面启动器时，覆盖静默失效，无任何副作用。
-- 卸载本插件后，桌面启动器自动回到普通启动，桌面图标仍可用。
-
-如果你不想让桌面图标走守护启动，在 设置 → 桌面启动器 里把「dsh 命令」改回 `dsh` 即可（配置覆盖会被你的手动值取代）。
+如果你装了 `@linxin666/dsh-web-ui-all`（全家桶，内含桌面启动器），本插件会自动对接：桌面启动器的「dsh 命令」会被指向 `scripts/guard-launcher.ps1`，让桌面的 DSH 图标双击 = 守护启动（两阶段健康检查 → 成功自动存复活币）。仅当 loader 存在该行时生效，未装时静默忽略，卸载插件后自动回到普通启动。
 
 ## 复活币机制
 
@@ -54,7 +47,8 @@ dsh plugin --profile web add dsh-fuhuobi
 
 | 时机 | 说明 |
 |------|------|
-| ✅ 成功启动 | boot-guard 两阶段健康检查（HTTP 通 + 客户端渲染确认）通过后自动存 |
+| ✅ 会话启动 | 客户端根组件成功渲染时自动存（每个进程会话第一次） |
+| ✅ 成功启动（守护） | boot-guard 两阶段健康检查通过后自动存 |
 | ✅ 手动 | Web 界面「复活币口袋」页或 `dsh-fuhuobi revive-coin --mark` |
 | ⚡ 插件安装前 | 自动快照（标签 auto-before-install），防手滑装崩 |
 
@@ -94,6 +88,7 @@ dsh-fuhuobi profiles                                                  列出所�
 - 查看每个环境（profile）的快照与当前复活币/前次备份
 - 点「用此复活币复活」恢复指定快照
 - 点「＋ 手动存币」手动存一枚复活币
+- **自定义桌面快捷方式**：勾选是否创建、上传自定义图标（有 Python 支持 PNG/JPG，无 Python 仅限 .ico）、查看实际文件路径
 - 设置每个环境保留的快照数量（最少 2）
 
 ## 配置
@@ -186,18 +181,11 @@ dsh plugin --profile web add dsh-fuhuobi
 
 Restart `dsh web`. This is a standard **bundle plugin**: it joins the profile layer stack and takes effect automatically.
 
-**Guarded boot is strongly recommended** (`scripts/boot-guard.ps1` on Windows / `scripts/boot-guard.sh` on macOS/Linux) instead of launching directly — only guarded boot mints the revival coin automatically.
+**Guarded boot is strongly recommended** (`scripts/boot-guard.ps1` on Windows / `scripts/boot-guard.sh` on macOS/Linux) instead of launching directly — guarded boot does a health check and auto-rolls-back on failure.
 
 ## Compatibility with the Desktop Launcher (dsh-desktop-launcher)
 
-If you also have `@linxin666/dsh-web-ui-all` installed (the all-in-one bundle that ships the desktop launcher), this plugin integrates with it automatically:
-
-- The launcher's **"dsh command"** setting is automatically pointed at `scripts/guard-launcher.ps1` (a config override — no file of dsh-desktop-launcher is touched).
-- After that, clicking the DSH icon on your desktop = **guarded boot**: pre-boot snapshot → two-phase health check → auto-mint a revival coin on success / auto-rollback and retry on failure.
-- Without the desktop launcher installed, the override silently no-ops — zero side effects.
-- After uninstalling this plugin, the desktop launcher falls back to a plain start; the icon keeps working.
-
-To opt out, set **"dsh command"** back to `dsh` in 设置 → 桌面启动器 (your manual value replaces the override).
+If you have `@linxin666/dsh-web-ui-all` installed (the all-in-one bundle that ships the desktop launcher), this plugin integrates automatically: the launcher's "dsh command" is pointed at `scripts/guard-launcher.ps1`, so the desktop DSH icon double-click = guarded boot (two-phase health check → auto-mint a revival coin on success). It no-ops silently when the loader row is absent, and falls back to a plain start after uninstall.
 
 ## How the Revival Coin Works
 
@@ -215,7 +203,8 @@ Always keeps: **1 current revival coin + 1 previous backup**, at most 2 coin-onl
 
 | When | What |
 |------|------|
-| ✅ Successful boot | After the boot-guard's two-phase health check (HTTP up + client render confirmed) |
+| ✅ Session start | Auto-minted when the client root component renders (first per process session) |
+| ✅ Successful guarded boot | After the boot-guard's two-phase health check passes |
 | ✅ Manual | In the Web UI "复活币口袋" page, or `dsh-fuhuobi revive-coin --mark` |
 | ⚡ Before plugin install | Automatic snapshot (tag `auto-before-install`) to guard against accidents |
 
@@ -255,6 +244,7 @@ Open **设置 → 复活币口袋**:
 - View each environment (profile)'s snapshots and current/previous coin
 - Click "用此复活币复活" to restore a snapshot
 - Click "＋ 手动存币" to mint a coin manually
+- **Custom desktop shortcut**: pick whether to create, upload a custom icon (PNG/JPG with Python, .ico only without), and see the actual file paths
 - Set how many snapshots each environment keeps (min 2)
 
 ## Configuration

@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync, execSync } from 'node:child_process'
 import { join, dirname, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
 import {
   dshHome, profilesDir, profileDir, rollbacksRoot, guardDir, guardLogsDir, guardConfigPath, reviveCoinPath, reviveCoinCmdPath, SNAPSHOT_FILES,
@@ -695,23 +696,119 @@ export function writeReviveCoinCmd(profile) {
 export function createReviveCoinShortcut() {
   if (process.platform !== 'win32') return
   const cmdPath = reviveCoinCmdPath()
+  // 保险：只有 cmd 确实存在时才创建快捷方式，避免把目标指向不存在的路径
+  // （例如冒烟测试用临时 DSH_HOME 时，cmd 会在临时目录，不该污染真实桌面）。
+  if (!existsSync(cmdPath)) return
   const desktop = join(homedir(), 'Desktop')
   const lnkPath = join(desktop, 'DSH复活币X1.lnk')
+
+  // 图标：优先用插件自带的黄色像素风硬币（随包分发），找不到则回退到
+  // $DSH_HOME/fuhuobi-icon/coin.ico，仍未找到就输出空（系统默认图标）。
+  const iconPath = resolveReviveCoinIconPath()
 
   const psScript = [
     `$ws = New-Object -ComObject WScript.Shell`,
     `$sc = $ws.CreateShortcut('${lnkPath.replace(/'/g, "''")}')`,
     `$sc.TargetPath = '${cmdPath.replace(/'/g, "''")}'`,
     `$sc.Description = '双击使用复活币恢复 DSH 至上次成功启动状态'`,
-    `$sc.Save()`,
-  ].join('; ')
+  ]
+  if (iconPath) {
+    psScript.push(`$sc.IconLocation = '${iconPath.replace(/'/g, "''")}'`)
+  }
+  psScript.push(`$sc.Save()`)
 
   const result = spawnSync(
     process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : 'powershell',
-    ['-NoProfile', '-NonInteractive', '-Command', psScript],
+    ['-NoProfile', '-NonInteractive', '-Command', psScript.join('; ')],
     { encoding: 'utf8', timeout: 10000 },
   )
   // 忽略错误（无桌面权限等）
+}
+
+/**
+ * 定位复活币快捷方式图标：
+ * 1. 自定义图标 $DSH_HOME/guard/custom-coin.ico（用户上传，若有）
+ * 2. 插件安装目录 assets/coin.ico（随 npm 包分发）
+ * 3. $DSH_HOME/fuhuobi-icon/coin.ico（本地兜底）
+ * 均不存在则返回 null（系统默认图标）。
+ */
+export function resolveReviveCoinIconPath() {
+  // 1. 用户自定义图标优先
+  const customIcon = join(guardDir(), 'custom-coin.ico')
+  if (existsSync(customIcon)) return customIcon
+  // 2. 插件自带默认（随包分发）
+  try {
+    const selfDir = dirname(fileURLToPath(import.meta.url))
+    const pkgIcon = join(selfDir, '..', 'assets', 'coin.ico')
+    if (existsSync(pkgIcon)) return pkgIcon
+  } catch { /* import.meta.url 不可用 */ }
+  // 3. 本地兜底
+  const homeIcon = join(dshHome(), 'fuhuobi-icon', 'coin.ico')
+  if (existsSync(homeIcon)) return homeIcon
+  return null
+}
+
+/**
+ * 保存用户自定义快捷方式图标。接收上传的图片 buffer（PNG/JPG/ICO），
+ * 转成 256 或原尺寸 ICO 存到 $DSH_HOME/guard/custom-coin.ico。
+ * 返回保存后的 .ico 路径；失败返回 null。
+ */
+/** 是否有可用的 Python + PIL（用于 PNG/JPG → ICO 转换）。 */
+export function hasPythonPil() {
+  try {
+    const r = spawnSync('python', ['-c', 'import PIL'], { encoding: 'utf8', timeout: 5000 })
+    return r.status === 0
+  } catch { return false }
+}
+
+/**
+ * 保存用户自定义快捷方式图标。
+ * - 若上传的是 .ico 截断/已含 ICO 头 → 直接保存。
+ * - 若是 PNG/JPG 且机器有 Python+PIL → 用 PIL 转成多尺寸 ICO。
+ * - 无 Python 时原样保存（可能读不了，前端会提示只能传 .ico）。
+ * 返回保存后的路径；失败返回 null。
+ */
+export function saveCustomCoinIcon(buffer) {
+  try {
+    if (!buffer || buffer.length === 0) return null
+    mkdirSync(guardDir(), { recursive: true })
+    const outPath = join(guardDir(), 'custom-coin.ico')
+    const buf = Buffer.from(buffer)
+
+    // 判断是否已是 ICO（以 00 00 01 00 开头）或用户签名
+    const isIco = buf.length >= 4 && buf[0] === 0x00 && buf[1] === 0x00 && buf[2] === 0x01 && buf[3] === 0x00
+
+    if (!isIco && hasPythonPil()) {
+      // 用 Python PIL 转成多尺寸 ICO。传入临时文件，转换后读回。
+      const tmpIn = join(guardDir(), 'custom-coin-input')
+      const tmpOut = join(guardDir(), 'custom-coin.ico')
+      writeFileSync(tmpIn, buf)
+      const script = [
+        `from PIL import Image`,
+        `import sys`,
+        `img = Image.open(r'${tmpIn.replace(/\\/g, '\\\\')}').convert('RGBA')`,
+        `img.save(r'${tmpOut.replace(/\\/g, '\\\\')}', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])`,
+      ].join('\n')
+      const r = spawnSync('python', ['-c', script], { encoding: 'utf8', timeout: 10000 })
+      try { rmSync(tmpIn, { force: true }) } catch { /* best effort */ }
+      if (r.status === 0 && existsSync(tmpOut)) return tmpOut
+      // 转换失败：回退原样保存（若用户传的其实是 .ico 内容）
+    }
+
+    // 无 Python 或非图片：原样保存（前端已限制 .ico 时走这里）
+    writeFileSync(outPath, buf)
+    return outPath
+  } catch { return null }
+}
+
+/** 是否有用户自定义图标存在。 */
+export function hasCustomCoinIcon() {
+  return existsSync(join(guardDir(), 'custom-coin.ico'))
+}
+
+/** 删除用户自定义图标（回到默认）。 */
+export function clearCustomCoinIcon() {
+  try { rmSync(join(guardDir(), 'custom-coin.ico'), { force: true }) } catch { /* best effort */ }
 }
 
 /**

@@ -13,13 +13,15 @@
 //
 // 进程外部分（scripts/）：独立命令行（`dsh-fuhuobi`）、守护启动脚本（Windows 与
 // POSIX）、以及复活币快捷方式脚本 — 详见 README。
-import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, markReviveCoin, desktopShortcutEnabled, setDesktopShortcutEnabled, DEFAULT_KEEP_SNAPSHOTS, MIN_KEEP_SNAPSHOTS, MAX_KEEP_SNAPSHOTS } from './engine.js'
+import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnapshotDir, restoreSnapshot, readGuardConfig, setKeepSnapshots, markReviveCoin, desktopShortcutEnabled, setDesktopShortcutEnabled, saveCustomCoinIcon, hasCustomCoinIcon, clearCustomCoinIcon, hasPythonPil, DEFAULT_KEEP_SNAPSHOTS, MIN_KEEP_SNAPSHOTS, MAX_KEEP_SNAPSHOTS } from './engine.js'
 import { incidentSectionText, readPending, resolveIncidentMarker } from './incident.js'
 import { createGuardTools } from './tools.js'
+import { reviveCoinCmdPath } from './layout.js'
 import z from '@deepseek-ai/schemastery'
 import { spawn } from 'node:child_process'
-import { resolve, dirname } from 'node:path'
+import { resolve, dirname, join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 
 export const name = 'fuhuobi'
 
@@ -58,6 +60,16 @@ function readBody(req) {
   })
 }
 
+/** 读取请求体的原始字节（用于图片上传）。 */
+function readRawBody(req) {
+  return new Promise((resolve) => {
+    const chunks = []
+    req.on('data', (c) => chunks.push(c))
+    req.on('end', () => resolve(Buffer.concat(chunks)))
+    req.on('error', () => resolve(Buffer.alloc(0)))
+  })
+}
+
 // ── API handlers ──
 async function handleState(_req, res) {
   try {
@@ -70,7 +82,24 @@ async function handleState(_req, res) {
         reason: s.reason,
       })),
     }))
-    send(res, { ok: true, keepSnapshots: readGuardConfig().keepSnapshots, desktopShortcut: desktopShortcutEnabled(), profiles })
+    // 实际文件路径：复活币 cmd 在 $DSH_HOME（用户数据目录），桌面快捷方式在桌面。
+    // 展示出来，让用户不必手动去找。
+    const cmdPath = reviveCoinCmdPath()
+    const desktop = join(homedir(), 'Desktop')
+    send(res, {
+      ok: true,
+      keepSnapshots: readGuardConfig().keepSnapshots,
+      desktopShortcut: desktopShortcutEnabled(),
+      hasCustomIcon: hasCustomCoinIcon(),
+      hasPythonPil: hasPythonPil(),
+      paths: {
+        coinCmd: cmdPath,
+        coinCmdExists: existsSync(cmdPath),
+        desktopShortcut: join(desktop, 'DSH复活币X1.lnk'),
+        desktopShortcutExists: existsSync(join(desktop, 'DSH复活币X1.lnk')),
+      },
+      profiles,
+    })
   } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
 }
 
@@ -128,6 +157,32 @@ async function handleDesktopShortcut(req, res) {
   } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
 }
 
+// ── 快捷方式自定义图标：POST 上传 / DELETE 清除 / GET 查询 ──
+async function handleIcon(req, res) {
+  try {
+    if (req.method === 'POST') {
+      const buf = await readRawBody(req)
+      const path = saveCustomCoinIcon(buf)
+      // 上传后会刷新快捷方式的图标
+      try {
+        const { createReviveCoinShortcut } = await import('./engine.js')
+        createReviveCoinShortcut()
+      } catch { /* 图标保存后重建快捷方式 best-effort */ }
+      return send(res, { ok: true, icon: path, hasCustom: !!path })
+    }
+    if (req.method === 'DELETE') {
+      clearCustomCoinIcon()
+      try {
+        const { createReviveCoinShortcut } = await import('./engine.js')
+        createReviveCoinShortcut()
+      } catch { /* best effort */ }
+      return send(res, { ok: true, hasCustom: false })
+    }
+    // GET: 返回当前是否有自定义图标
+    send(res, { ok: true, hasCustom: hasCustomCoinIcon() })
+  } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
+}
+
 // ── 客户端渲染心跳 / 崩溃回报（黑屏检测）。rc.7 的客户端渲染失败是纯浏览器
 // 侧事件，服务端 HTTP 仍返回 200；复活币客户端在根槽位渲染成功时 POST
 // /fuhuobi/api/booted，在根槽位渲染崩溃时 POST /fuhuobi/api/render-error，守护
@@ -138,7 +193,14 @@ let guardRenderError = null // string message; null = 无渲染崩溃
 async function handleBooted(req, res) {
   try {
     if (req.method === 'POST') {
-      guardClientBooted = true
+      // 客户端根组件成功渲染 = 这个进程"确认可用"。
+      // 第一次 booted 时自动存一枚复活币（会话启动时），后续刷新不再存。
+      if (!guardClientBooted) {
+        guardClientBooted = true
+        try {
+          markReviveCoin(REVIVE_COIN_PROFILE)
+        } catch { /* 存币失败不阻塞 */ }
+      }
       return send(res, { ok: true, booted: true })
     }
     send(res, { ok: true, booted: guardClientBooted })
@@ -337,6 +399,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/fuhuobi/api/rollback', handler: handleRollback },
       { kind: 'exact', path: '/fuhuobi/api/keep', handler: handleKeep },
       { kind: 'exact', path: '/fuhuobi/api/desktop-shortcut', handler: handleDesktopShortcut },
+      { kind: 'exact', path: '/fuhuobi/api/icon', handler: handleIcon },
       { kind: 'exact', path: '/fuhuobi/api/booted', handler: handleBooted },
       { kind: 'exact', path: '/fuhuobi/api/render-error', handler: handleRenderError },
       { kind: 'exact', path: '/fuhuobi/api/revive-coin', handler: handleReviveCoin },

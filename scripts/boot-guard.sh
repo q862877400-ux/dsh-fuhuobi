@@ -66,8 +66,6 @@ if healthy; then
   exit 0
 fi
 
-guard snapshot --tag pre-boot --reason "automatic snapshot before boot"
-
 PID=$(start_server)
 log "started server (pgid $PID)"
 if wait_healthy "$FIRST_WAIT_SEC"; then

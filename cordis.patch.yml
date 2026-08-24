@@ -5,7 +5,7 @@
 
 # 兼容 dsh-desktop-launcher（@linxin666/dsh-web-ui-all 全家桶子插件）：
 # 把桌面启动器的「dsh 命令」指向本插件的守护启动包装脚本，让桌面图标
-# 双击即走 boot-guard 守护启动（启动前快照 → 健康检查 → 自动存复活币）。
+# 双击即走 boot-guard 守护启动（两阶段健康检查 → 成功自动存复活币）。
 # 仅当 loader 中存在 web-ui-desktop-launcher 行时生效；未装该插件时静默忽略。
 # 注意：!!js 表达式运行在 ESM 环境（无 require 全局），只能使用 process 等全局。
 - id: web-ui-desktop-launcher

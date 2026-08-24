@@ -4,9 +4,10 @@
 #   launcher.ps1 invokes the dshCommand script as:
 #     powershell -NoProfile -File guard-launcher.ps1 web [--profile X]
 #   This script swallows those args and forwards to boot-guard.ps1, so a
-#   desktop-icon double-click becomes a guarded boot: pre-boot snapshot ->
-#   two-phase health check -> auto-mint revival coin on success / auto-rollback
-#   on failure.
+#   desktop-icon double-click becomes a guarded boot: two-phase health check ->
+#   auto-mint revival coin on success / auto-rollback on failure.
+#   Note: no pre-boot snapshot is taken (the coin is only minted AFTER a
+#   confirmed-good boot, so a bad state is never snapshotted as a coin).
 #
 # ASCII only: runs with Windows PowerShell 5.1 (no BOM).
 #

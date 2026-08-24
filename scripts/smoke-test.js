@@ -9,10 +9,13 @@ process.env.DSH_HOME = join(tmp, '.dsh-home')
 
 const {
   snapshotProfile, listSnapshots, restoreSnapshot, resolveSnapshotDir, listProfiles,
-  markReviveCoin, readReviveCoin,
+  markReviveCoin, readReviveCoin, setDesktopShortcutEnabled,
 } = await import('../src/engine.js')
 const { readPending, writePending, incidentSectionText, resolveIncidentMarker } = await import('../src/incident.js')
 const { pendingMarkerPath } = await import('../src/layout.js')
+
+// 冒烟测试在临时 DSH_HOME 下跑，绝不触碰真实桌面快捷方式。
+setDesktopShortcutEnabled(false)
 
 let failures = 0
 function check(name, ok, extra = '') {
