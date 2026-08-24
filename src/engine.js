@@ -673,19 +673,15 @@ export function writeReviveCoinCmd(profile) {
     '',
     'if defined CLI_PATH (',
     '  node "%CLI_PATH%" revive-coin --use',
+    '  echo.',
+    '  echo [DSH 复活币] 按任意键关闭本窗口。',
+    '  pause >nul',
     ') else (',
     '  echo [DSH 复活币] 找不到 guard-cli.js，请确认 dsh-fuhuobi 已安装。',
     '  pause',
     '  exit /b 1',
     ')',
-    'echo.',
-    'if %ERRORLEVEL% equ 0 (',
-    '  echo [DSH 复活币] 复活成功，请重启 DSH。',
-    ') else (',
-    '  echo [DSH 复活币] 复活失败，请查看上方错误信息。',
-    ')',
-    'echo.',
-    'pause',
+    'exit /b 0',
   ].join('\r\n')
 
   mkdirSync(dirname(cmdPath), { recursive: true })

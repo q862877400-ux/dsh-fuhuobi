@@ -20,6 +20,28 @@ import {
 import {
   readPending, resolveIncidentMarker, buildIncidentReport, health, writeQuarantineMarker,
 } from '../src/incident.js'
+import { createInterface } from 'node:readline'
+
+// ── 恢复快照的公共逻辑（被 revive-coin --use 与交互选择复用）──
+function doRestoreSnapshot(profile, stamp, opts) {
+  const dir = resolveSnapshotDir(profile, { id: stamp })
+  if (!dir) {
+    console.error(`找不到快照节点: ${stamp}`)
+    return 1
+  }
+  console.log(`恢复 ${profile} -> ${dir.split(/[\\/]/).at(-1)}`)
+  const { pnpm, removedLinks } = restoreSnapshot(profile, dir, { skipInstall: opts.skipInstall === true })
+  if (pnpm !== null && !pnpm.ok) {
+    console.error(`pnpm 失败(退出码 ${pnpm.status}): ${pnpm.output}`)
+    console.error('配置文件已还原; 待 pnpm/网络可用后请手动运行 pnpm install --frozen-lockfile。')
+    return 1
+  }
+  console.log('复活成功！请重启 DSH。')
+  if (removedLinks && removedLinks.length > 0) {
+    console.log(`已清理残留的 bundle 链接: ${removedLinks.join(', ')}`)
+  }
+  return 0
+}
 
 function parseArgs(argv) {
   const opts = { _: [] }
@@ -37,6 +59,7 @@ function parseArgs(argv) {
     else if (a === '--no-marker') opts.noMarker = true
     else if (a === '--mark') opts.mark = true
     else if (a === '--use') opts.use = true
+    else if (a === '--yes') opts.yes = true
     else if (a === '--plugin') opts.plugin = argv[++i]
     else if (a === '--undo') opts.undo = true
     else if (a === '--diagnose') opts.diagnose = true
@@ -176,24 +199,42 @@ async function main() {
         return 0
       }
       if (opts.use === true) {
-        // 双击 DSH复活币X1.cmd 走这里：回滚到当前复活币快照。
-        const snap = resolveReviveCoinSnapshot(profile)
-        if (!snap) {
-          console.error('没有可用的复活币快照。请先成功启动一次 DSH 自动存币，或运行 dsh-fuhuobi revive-coin --mark 手动存币。')
+        // 双击 DSH复活币X1.cmd 走这里：列出可恢复的节点，让用户选择。
+        // 列表只显示创建时间（不显示"复活币"等 tag 名称）。
+        const snaps = listSnapshots(profile)
+          .filter((s) => s.time !== '')
+          .sort((a, b) => b.time.localeCompare(a.time))
+        if (snaps.length === 0) {
+          console.error('没有可恢复的快照节点。请先存一枚复活币。')
           return 1
         }
-        console.log(`使用复活币恢复 ${profile} -> ${snap.split(/[\\/]/).at(-1)}`)
-        const { pnpm, removedLinks } = restoreSnapshot(profile, snap, { skipInstall: opts.skipInstall === true })
-        if (pnpm !== null && !pnpm.ok) {
-          console.error(`pnpm 失败(退出码 ${pnpm.status}): ${pnpm.output}`)
-          console.error('配置文件已还原; 待 pnpm/网络可用后请手动运行 pnpm install --frozen-lockfile。')
-          return 1
+        console.log(`可选择恢复节点（profile: ${profile}）：`)
+        snaps.forEach((s, i) => {
+          console.log(`  [${i + 1}] ${s.time}`)
+        })
+        console.log('')
+        if (opts.yes === true) {
+          // 非交互（脚本调用/无人值守）：恢复第 1 个（最新）节点
+          return doRestoreSnapshot(profile, snaps[0].stamp, opts)
         }
-        console.log('复活成功！请重启 DSH。')
-        if (removedLinks && removedLinks.length > 0) {
-          console.log(`已清理残留的 bundle 链接: ${removedLinks.join(', ')}`)
+        console.log('请输入要恢复的节点编号（回车恢复第 1 个，q 取消）：')
+        let choice = ''
+        try {
+          const rl = createInterface({ input: process.stdin, output: process.stdout })
+          choice = await new Promise((resolve) => {
+            rl.question('> ', (ans) => { rl.close(); resolve(ans) })
+          })
+        } catch { choice = '' }
+        const trimmed = (choice || '').trim()
+        if (trimmed === 'q' || trimmed === 'Q') {
+          console.log('已取消。')
+          return 0
         }
-        return 0
+        const idx = Number(trimmed)
+        const target = (Number.isInteger(idx) && idx >= 1 && idx <= snaps.length)
+          ? snaps[idx - 1]
+          : snaps[0] // 空输入或无效输入 → 恢复第 1 个
+        return doRestoreSnapshot(profile, target.stamp, opts)
       }
       const coin = readReviveCoin()
       const snap = coin.current ? resolveReviveCoinSnapshot(profile) : null
