@@ -17,6 +17,9 @@ import { snapshotAll, snapshotProfile, listProfiles, listSnapshots, resolveSnaps
 import { incidentSectionText, readPending, resolveIncidentMarker } from './incident.js'
 import { createGuardTools } from './tools.js'
 import z from '@deepseek-ai/schemastery'
+import { spawn } from 'node:child_process'
+import { resolve, dirname } from 'node:path'
+import { existsSync } from 'node:fs'
 
 export const name = 'fuhuobi'
 
@@ -171,6 +174,125 @@ async function handleReviveCoin(req, res) {
   } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
 }
 
+// ── 守护重启 ──
+//
+// 用正确的方式重建启动命令（绝对路径 entry + execArgv 传递 + entry 目录作
+// cwd），通过 boot-guard 拉起新实例。修复了常见"硬性重启不生效"的根因：
+// 相对路径 entry 从子进程 cwd 解析失败（MODULE_NOT_FOUND），以及 execArgv
+// （--import tsx/esm）未传递导致 tsx 找不到。
+function rebuildLaunch() {
+  const entry = process.argv[1]
+  if (entry !== undefined && /[\\/](?:bin\.(?:js|ts)|dsh)$/.test(entry)) {
+    const abs = resolve(entry)
+    return {
+      file: process.execPath,
+      args: [...process.execArgv, abs, ...process.argv.slice(2)],
+      cwd: dirname(abs),
+      viaShell: false,
+    }
+  }
+  // 裸 dsh（.cmd shim），Windows 需要 shell 启动
+  return { file: 'dsh', args: [], cwd: undefined, viaShell: process.platform === 'win32' }
+}
+
+/** 在 profile 下找到 boot-guard.ps1（Windows）或 boot-guard.sh（POSIX）。 */
+function locateBootGuard() {
+  const profile = REVIVE_COIN_PROFILE
+  const candidates = [
+    join2(dshHomeSafe(), 'profiles', profile, 'node_modules', 'dsh-fuhuobi', 'scripts', 'boot-guard.ps1'),
+    join2(dshHomeSafe(), 'profiles', profile, 'node_modules', 'dsh-fuhuobi', 'scripts', 'boot-guard.sh'),
+  ]
+  for (const c of candidates) if (existsSync(c)) return c
+  return null
+}
+
+function dshHomeSafe() {
+  const h = process.env.DSH_HOME
+  if (h && h.trim() !== '') return h.trim()
+  const base = process.env.USERPROFILE || process.env.HOME || ''
+  return base ? base + '/.dsh' : ''
+}
+
+function join2(...parts) {
+  return parts.filter((p) => p !== '' && p != null).join('/')
+}
+
+/**
+ * 守护重启：spawn detached 代理 → 等待端口释放 → 通过 boot-guard 拉起
+ * 新实例（快照 + 健康检查 + 存复活币）→ 当前进程退出。
+ * 返回 { ok, note }；实际退出由代理 + 本进程完成。
+ */
+function scheduleGuardedRestart() {
+  const launch = rebuildLaunch()
+  const bootGuard = locateBootGuard()
+  const isWin = process.platform === 'win32'
+
+  // 代理脚本：等待端口释放后用 boot-guard（若有）或原始命令拉起新实例。
+  const bootGuardJson = JSON.stringify(bootGuard)
+  const profileJson = JSON.stringify(REVIVE_COIN_PROFILE)
+  const fileJson = JSON.stringify(launch.file)
+  const argsJson = JSON.stringify(launch.args)
+  const cwdJson = JSON.stringify(launch.cwd ?? process.cwd())
+  const viaShellJson = JSON.stringify(launch.viaShell === true)
+
+  const proxy = `
+const { spawn } = require('node:child_process');
+const net = require('node:net');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const listening = () => new Promise((resolve) => {
+  const probe = net.connect({ host: '127.0.0.1', port: 3080 });
+  const done = (v) => { probe.destroy(); resolve(v); };
+  probe.on('connect', () => done(true));
+  probe.on('error', () => done(false));
+  setTimeout(() => done(false), 500);
+});
+(async () => {
+  const until = Date.now() + 30000;
+  while (Date.now() < until && await listening()) await sleep(250);
+  await sleep(400);
+  const bootGuard = ${bootGuardJson};
+  const profile = ${profileJson};
+  let file, args, cwd, viaShell;
+  if (bootGuard) {
+    file = '${isWin ? 'powershell.exe' : 'bash'}';
+    args = ${isWin
+      ? `['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', bootGuard, '-Profile', profile]`
+      : `['-c', 'cd "$(dirname "$0")" 2>/dev/null; ' + JSON.stringify(bootGuard) + ' -Profile ' + profile]`};
+    cwd = undefined;
+    viaShell = false;
+  } else {
+    file = ${fileJson};
+    args = ${argsJson};
+    cwd = ${cwdJson};
+    viaShell = ${viaShellJson};
+  }
+  try {
+    const child = spawn(file, args, { cwd, detached: true, stdio: 'ignore', env: process.env, shell: viaShell });
+    child.unref();
+  } catch (e) { /* ignore */ }
+  await sleep(1000);
+})();
+`
+
+  try {
+    const helper = spawn(process.execPath, ['-e', proxy], {
+      detached: true,
+      stdio: 'ignore',
+      env: process.env,
+    })
+    helper.unref()
+  } catch { /* 代理拉起失败 */ }
+  // 给 HTTP 响应 flush 留时间，然后退出当前进程
+  setTimeout(() => process.exit(0), 400)
+}
+
+async function handleGuardedRestart(req, res) {
+  try {
+    send(res, { ok: true, restarting: true, bootGuard: locateBootGuard() !== null, note: '守护重启已调度：新实例将通过 boot-guard 启动（快照 + 健康检查 + 存复活币）' })
+    scheduleGuardedRestart()
+  } catch (e) { send(res, { ok: false, error: errMsg(e) }) }
+}
+
 export function apply(ctx) {
   // 1. Incident-alert prompt section.
   const sp = ctx.get('systemPrompt')
@@ -218,6 +340,7 @@ export function apply(ctx) {
       { kind: 'exact', path: '/fuhuobi/api/booted', handler: handleBooted },
       { kind: 'exact', path: '/fuhuobi/api/render-error', handler: handleRenderError },
       { kind: 'exact', path: '/fuhuobi/api/revive-coin', handler: handleReviveCoin },
+      { kind: 'exact', path: '/fuhuobi/api/guarded-restart', handler: handleGuardedRestart },
     ]
     for (const route of routes) {
       wctx.effect(() => wctx.webServer.register(route), `fuhuobi: ${route.path} route`)
