@@ -689,12 +689,21 @@ export function writeReviveCoinCmd(profile) {
   writeFileSync(cmdPath, content, 'utf8')
 }
 
+// 桌面操作闸：冒烟测试等针对临时 DSH_HOME 的代码绝不允许碰真实桌面。
+// create/remove 快捷方式都先看这个闸——create 有 cmd 存在性守卫只会"不建"，
+// remove 却会删到真实桌面（它只认 homedir()，不看 DSH_HOME），必须显式拦住。
+let desktopShortcutOpsEnabled = true
+export function setDesktopShortcutOpsEnabled(v) {
+  desktopShortcutOpsEnabled = v === true
+}
+
 /**
  * 在桌面创建 DSH复活币X1.lnk 快捷方式（Windows 专用）。
  * 使用 PowerShell 的 COM 接口创建 .lnk。
  */
 export function createReviveCoinShortcut() {
   if (process.platform !== 'win32') return
+  if (!desktopShortcutOpsEnabled) return
   const cmdPath = reviveCoinCmdPath()
   // 保险：只有 cmd 确实存在时才创建快捷方式，避免把目标指向不存在的路径
   // （例如冒烟测试用临时 DSH_HOME 时，cmd 会在临时目录，不该污染真实桌面）。
@@ -816,6 +825,7 @@ export function clearCustomCoinIcon() {
  */
 export function removeReviveCoinShortcut() {
   if (process.platform !== 'win32') return
+  if (!desktopShortcutOpsEnabled) return
   const desktop = join(homedir(), 'Desktop')
   const lnkPath = join(desktop, 'DSH复活币X1.lnk')
   try { rmSync(lnkPath, { force: true }) } catch { /* best effort */ }

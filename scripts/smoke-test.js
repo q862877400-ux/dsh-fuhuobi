@@ -9,12 +9,15 @@ process.env.DSH_HOME = join(tmp, '.dsh-home')
 
 const {
   snapshotProfile, listSnapshots, restoreSnapshot, resolveSnapshotDir, listProfiles,
-  markReviveCoin, readReviveCoin, setDesktopShortcutEnabled,
+  markReviveCoin, readReviveCoin, setDesktopShortcutEnabled, setDesktopShortcutOpsEnabled,
 } = await import('../src/engine.js')
 const { readPending, writePending, incidentSectionText, resolveIncidentMarker } = await import('../src/incident.js')
 const { pendingMarkerPath } = await import('../src/layout.js')
 
-// 冒烟测试在临时 DSH_HOME 下跑，绝不触碰真实桌面快捷方式。
+// 冒烟测试在临时 DSH_HOME 下跑，绝不触碰真实桌面快捷方式：
+// 先关桌面操作闸——否则 setDesktopShortcutEnabled(false) 里的
+// removeReviveCoinShortcut() 会删掉真实桌面上的 lnk（它只认 homedir()）。
+setDesktopShortcutOpsEnabled(false)
 setDesktopShortcutEnabled(false)
 
 let failures = 0

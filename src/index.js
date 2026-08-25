@@ -20,7 +20,7 @@ import { reviveCoinCmdPath } from './layout.js'
 import z from '@deepseek-ai/schemastery'
 import { spawn } from 'node:child_process'
 import { resolve, dirname, join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 export const name = 'fuhuobi'
@@ -200,6 +200,9 @@ async function handleBooted(req, res) {
         try {
           markReviveCoin(REVIVE_COIN_PROFILE)
         } catch { /* 存币失败不阻塞 */ }
+        try {
+          writeLaunchManifest()
+        } catch { /* 启动清单写入失败不阻塞 */ }
       }
       return send(res, { ok: true, booted: true })
     }
@@ -257,6 +260,28 @@ function rebuildLaunch() {
   return { file: 'dsh', args: [], cwd: undefined, viaShell: process.platform === 'win32' }
 }
 
+// 持久化启动清单：桌面快捷方式 / 守护脚本靠这份清单原样重启 DSH，不猜任何
+// 路径；每次确认可用启动都会覆盖刷新。
+function writeLaunchManifest() {
+  try {
+    const launch = rebuildLaunch()
+    const home = dshHomeSafe()
+    if (home === '') return
+    const dir = join(home, 'guard')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'launch.json'), JSON.stringify({
+      version: 1,
+      file: launch.file,
+      args: launch.args,
+      cwd: launch.cwd ?? process.cwd(),
+      viaShell: launch.viaShell === true,
+      dshHome: home,
+      profile: REVIVE_COIN_PROFILE,
+      writtenAt: new Date().toISOString(),
+    }, null, 2) + '\n')
+  } catch { /* 启动清单写入失败不阻塞 */ }
+}
+
 /** 在 profile 下找到 boot-guard.ps1（Windows）或 boot-guard.sh（POSIX）。 */
 function locateBootGuard() {
   const profile = REVIVE_COIN_PROFILE
@@ -269,9 +294,19 @@ function locateBootGuard() {
 }
 
 function dshHomeSafe() {
-  const h = process.env.DSH_HOME
-  if (h && h.trim() !== '') return h.trim()
   const base = process.env.USERPROFILE || process.env.HOME || ''
+  let h = process.env.DSH_HOME
+  if (h && h.trim() !== '') {
+    // 与 boot-guard.ps1 / boot-guard.sh（以及 DSH 本体 resolveDshHome 的
+    // expandHome）保持一致：展开开头的 ~。否则启动清单会被写进字面 "~"
+    // 目录，守护脚本按展开后的路径永远找不到它。
+    h = h.trim()
+    if (h === '~') return base
+    if (h.startsWith('~/') || h.startsWith('~\\')) {
+      return base ? base + '/' + h.slice(2).replace(/^[\\/]+/, '') : ''
+    }
+    return h
+  }
   return base ? base + '/.dsh' : ''
 }
 

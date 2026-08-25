@@ -1,4 +1,4 @@
-# boot-guard.ps1 — guarded boot for DeepSeek Harness (Windows).
+# boot-guard.ps1 - guarded boot for DeepSeek Harness (Windows).
 #
 # Snapshots every profile, starts `dsh web`, health-checks it, and on failure
 # kills the tree, rolls back to the last good snapshot and retries once.
@@ -38,15 +38,25 @@ try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } 
 
 if (-not $HarnessRoot) { $HarnessRoot = Split-Path -Parent $PSScriptRoot }
 $HarnessRoot = $HarnessRoot.Trim().TrimEnd([char]34, [char]39, [char]92)  # strip stray quote/trailing slash
-if (-not $env:DSH_HOME -or $env:DSH_HOME.Trim() -eq "") {
-    $env:DSH_HOME = Join-Path $HarnessRoot ".dsh-home"
+# DSH_HOME is where the harness keeps its profile/guard/launch state. Never
+# derive it from $HarnessRoot (that is the plugin package dir, not the harness
+# root) - doing so creates a junk empty data home and a fresh, config-less DSH.
+# Prefer an explicit $env:DSH_HOME (expanding a leading "~" to $HOME), else
+# default to the standard per-user location.
+$dshHome = $env:DSH_HOME
+if ($null -ne $dshHome) { $dshHome = $dshHome.Trim() }
+if ([string]::IsNullOrEmpty($dshHome)) {
+    $dshHome = Join-Path $HOME ".dsh"
+} elseif ($dshHome.StartsWith("~")) {
+    $dshTail = $dshHome.Substring(1).TrimStart([char]92, [char]47)  # strip leading "\" (92) or "/" (47)
+    if ([string]::IsNullOrEmpty($dshTail)) { $dshHome = $HOME } else { $dshHome = Join-Path $HOME $dshTail }
 }
+$env:DSH_HOME = $dshHome
 
-# Locate the guard CLI shipped inside the installed package.
+# Locate the guard CLI shipped inside the profile-rooted package. This is the
+# only valid location; if it is absent the guard action is logged and skipped,
+# never fatal.
 $cli = Join-Path $env:DSH_HOME ("profiles\" + $Profile + "\node_modules\dsh-fuhuobi\scripts\guard-cli.js")
-if (-not (Test-Path $cli)) {
-    $cli = Join-Path $HarnessRoot "node_modules\dsh-fuhuobi\scripts\guard-cli.js"
-}
 
 $logDir = Join-Path $env:DSH_HOME "guard\logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -70,6 +80,10 @@ function Test-Health {
     } catch { return $false }
 }
 function Invoke-Guard([string[]]$cliArgs) {
+    if (-not (Test-Path $cli)) {
+        Log ("guard-cli not found at " + $cli + " - skipping guard action")
+        return ""
+    }
     $out = & node $cli @cliArgs 2>&1 | Out-String
     if ($out) { foreach ($line in ($out -split "`r?`n")) { if ($line.Trim()) { Log ("  [guard] " + $line.Trim()) } } }
     return $out
@@ -93,19 +107,92 @@ function Wait-Healthy([int]$seconds, [System.Diagnostics.Process]$proc) {
     }
     return "timeout"
 }
+function Format-Args([object[]]$argsList) {
+    # Build a single argument string for Start-Process -ArgumentList. PS 5.1
+    # uses the .NET Framework ProcessStartInfo, which has no ArgumentList, and
+    # Start-Process does not quote array elements on its own, so paths with
+    # spaces get split. Wrap every arg that contains whitespace (or is empty)
+    # in double quotes and double any embedded double quotes as the target
+    # command-line parser expects.
+    if ($null -eq $argsList -or $argsList.Count -eq 0) { return "" }
+    $quoted = @()
+    foreach ($a in $argsList) {
+        $s = [string]$a
+        if ($s -eq "" -or $s -match '\s') {
+            $s = '"' + ($s -replace '"', '""') + '"'
+        }
+        $quoted += $s
+    }
+    return ($quoted -join " ")
+}
+
 function Start-Server([string]$outLog, [string]$errLog) {
+    # 1) Launch manifest (authoritative). The fuhuobi plugin rewrites
+    #    <DSH_HOME>\guard\launch.json after every confirmed-good boot, so it
+    #    wins over guessing how this harness was installed (source checkout
+    #    launched via `pnpm dsh` has no dsh.cmd and no `dsh` on PATH).
+    $manifestPath = Join-Path $env:DSH_HOME ("guard\launch.json")
+    if (Test-Path $manifestPath) {
+        try {
+            $m = Get-Content -Path $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+            if ($null -ne $m -and -not [string]::IsNullOrEmpty([string]$m.file)) {
+                $argsList = @()
+                if ($m.args -is [array]) { $argsList = $m.args } elseif ($null -ne $m.args) { $argsList = @($m.args) }
+                $argStr = Format-Args $argsList
+                $cwd = [string]$HarnessRoot
+                if (-not [string]::IsNullOrEmpty([string]$m.cwd)) { $cwd = [string]$m.cwd }
+                if ($m.viaShell) {
+                    $cmdLine = '"' + $m.file + '"'
+                    if ($argStr -ne "") { $cmdLine = $cmdLine + " " + $argStr }
+                    return (Start-Process -FilePath "cmd.exe" `
+                        -ArgumentList '/d', '/s', '/c', $cmdLine `
+                        -WorkingDirectory $cwd `
+                        -RedirectStandardOutput $outLog `
+                        -RedirectStandardError $errLog `
+                        -WindowStyle Hidden `
+                        -PassThru)
+                } else {
+                    $spArgs = @{ FilePath = [string]$m.file; WorkingDirectory = $cwd; RedirectStandardOutput = $outLog; RedirectStandardError = $errLog; WindowStyle = "Hidden"; PassThru = $true }
+                    if ($argStr -ne "") { $spArgs.Add("ArgumentList", $argStr) }
+                    return (Start-Process @spArgs)
+                }
+            }
+        } catch {
+            Log ("launch manifest present but could not be parsed: " + $_.Exception.Message + " - falling back to PATH/harness layout")
+        }
+    }
+
+    # 2) `dsh` on PATH (e.g. an installed CLI). Run through a shell so PATH
+    #    resolution and any .cmd wrapper behave like a normal console launch.
+    if (Get-Command dsh -ErrorAction SilentlyContinue) {
+        $cmdLine = "dsh web"
+        if ($ServerArgs.Trim() -ne "") { $cmdLine = $cmdLine + " " + $ServerArgs.Trim() }
+        return (Start-Process -FilePath "cmd.exe" `
+            -ArgumentList '/d', '/s', '/c', $cmdLine `
+            -WorkingDirectory $HarnessRoot `
+            -RedirectStandardOutput $outLog `
+            -RedirectStandardError $errLog `
+            -WindowStyle Hidden `
+            -PassThru)
+    }
+
+    # 3) Legacy harness-root dsh.cmd layout.
     $dshCmd = Join-Path $HarnessRoot "node_modules\.bin\dsh.cmd"
-    if (-not (Test-Path $dshCmd)) { $dshCmd = "dsh.cmd" }
-    $cmdLine = '"' + $dshCmd + '" web'
-    if ($ServerArgs.Trim() -ne "") { $cmdLine = $cmdLine + " " + $ServerArgs.Trim() }
-    $p = Start-Process -FilePath "cmd.exe" `
-        -ArgumentList '/d', '/s', '/c', $cmdLine `
-        -WorkingDirectory $HarnessRoot `
-        -RedirectStandardOutput $outLog `
-        -RedirectStandardError $errLog `
-        -WindowStyle Hidden `
-        -PassThru
-    return $p
+    if (Test-Path $dshCmd) {
+        $cmdLine = '"' + $dshCmd + '" web'
+        if ($ServerArgs.Trim() -ne "") { $cmdLine = $cmdLine + " " + $ServerArgs.Trim() }
+        return (Start-Process -FilePath "cmd.exe" `
+            -ArgumentList '/d', '/s', '/c', $cmdLine `
+            -WorkingDirectory $HarnessRoot `
+            -RedirectStandardOutput $outLog `
+            -RedirectStandardError $errLog `
+            -WindowStyle Hidden `
+            -PassThru)
+    }
+
+    # 4) Nothing to launch with: no manifest and no resolvable launcher.
+    Log "no launch manifest and no dsh on PATH - boot DSH once from the CLI so <DSH_HOME>\guard\launch.json gets written"
+    return $null
 }
 function Stop-ServerTree($p) {
     if ($p -and -not $p.HasExited) {
@@ -156,7 +243,7 @@ function Test-RenderReady([int]$seconds) {
 function Confirm-RenderReady {
     # Two-phase render confirmation. Phase 1 is a short settle; if it yields
     # nothing, phase 2 waits much longer because the launcher (launch.vbs)
-    # opens the browser only AFTER the server answers — so a healthy render can
+    # opens the browser only AFTER the server answers - so a healthy render can
     # legitimately arrive tens of seconds after HTTP 200.
     # Returns "ok" | "rendercrash" | "unconfirmed".
     # -RenderSettleSec 0 disables the render check (headless/server-only boots).
@@ -172,8 +259,13 @@ Log "=== boot guard start ==="
 if (Test-Health) { Log "already healthy"; Set-Status "OK" "already-running"; exit 0 }
 
 $proc = Start-Server $serverOut $serverErr
-Log "started server (pid $($proc.Id))"
-$boot = Wait-Healthy $FirstWaitSec $proc
+if ($null -eq $proc) {
+    Log "no server process could be started (no launch manifest and no dsh on PATH) - skipping health check"
+    $boot = "nostart"
+} else {
+    Log "started server (pid $($proc.Id))"
+    $boot = Wait-Healthy $FirstWaitSec $proc
+}
 if ($boot -eq "ok") {
     # HTTP is up; confirm the web client actually rendered (rc.7 black-screen /
     # stuck-boot detection). A render crash or a never-ready client rolls back
@@ -202,8 +294,13 @@ Stop-ServerTree $proc
 $null = Invoke-Guard @("rollback", "--good")
 
 $proc2 = Start-Server $serverOut $serverErr
-Log "restarted server (pid $($proc2.Id))"
-$retry = Wait-Healthy $RetryWaitSec $proc2
+if ($null -eq $proc2) {
+    Log "no server process could be started on retry - skipping health check"
+    $retry = "nostart"
+} else {
+    Log "restarted server (pid $($proc2.Id))"
+    $retry = Wait-Healthy $RetryWaitSec $proc2
+}
 if ($retry -eq "ok") {
     $retryRender = Confirm-RenderReady
     if ($retryRender -ne "ok") { $retry = "rendercrash" }
@@ -224,8 +321,13 @@ if ($retry -eq "ok") {
         Log "culprit plugin identified: $culprit - disabling it and booting without it"
         $null = Invoke-Guard @("quarantine", "--plugin", $culprit)
         $proc3 = Start-Server $serverOut $serverErr
-        Log "restarted server without $culprit (pid $($proc3.Id))"
-        $qBoot = Wait-Healthy $RetryWaitSec $proc3
+        if ($null -eq $proc3) {
+            Log "no server process could be started after quarantine - skipping health check"
+            $qBoot = "nostart"
+        } else {
+            Log "restarted server without $culprit (pid $($proc3.Id))"
+            $qBoot = Wait-Healthy $RetryWaitSec $proc3
+        }
         if ($qBoot -eq "ok") {
             $qRender = Confirm-RenderReady
             if ($qRender -ne "ok") { $qBoot = "rendercrash" }

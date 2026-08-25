@@ -40,6 +40,10 @@ function doRestoreSnapshot(profile, stamp, opts) {
   if (removedLinks && removedLinks.length > 0) {
     console.log(`已清理残留的 bundle 链接: ${removedLinks.join(', ')}`)
   }
+  // 恢复后校验：提示用守护启动重启（boot-guard 会自动健康检查 + 失败回滚）。
+  if (opts.verify !== false) {
+    console.log('💡 建议用守护启动重启（boot-guard 会在启动失败时自动回滚到上一个复活币）。')
+  }
   return 0
 }
 
