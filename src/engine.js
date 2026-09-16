@@ -10,6 +10,7 @@ import { spawnSync, execSync } from 'node:child_process'
 import { join, dirname, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import yaml from 'js-yaml'
 import {
   dshHome, profilesDir, profileDir, rollbacksRoot, guardDir, guardLogsDir, guardConfigPath, reviveCoinPath, reviveCoinCmdPath, SNAPSHOT_FILES,
@@ -24,10 +25,20 @@ export const DEFAULT_PORT = 3080
 export const DEFAULT_KEEP_LOGS = 30
 
 /** Resolved DeepSeek Harness (dsh) version, recorded in every snapshot for
- * provenance. Reads the installed @deepseek-ai/dsh package next to DSH_HOME;
- * falls back to the root package.json dependency spec. Returns '' when
- * unresolvable (never throws). */
+ * provenance. Resolves the real @deepseek-ai/dsh package (which lives at
+ * <harness>/apps/cli), then falls back to the legacy "$DSH_HOME one level up"
+ * guesses. Returns '' when unresolvable (never throws). */
 export function harnessVersion() {
+  // 1) 真实解析 @deepseek-ai/dsh —— 实测从插件自身位置即可解析到
+  //    <harness>/apps/cli/package.json（name=@deepseek-ai/dsh，version 即 DSH 版本）。
+  //    旧的"$DSH_HOME 上一级"猜测在标准安装下不存在，故恒返回 ''。
+  try {
+    const req = createRequire(import.meta.url)
+    let resolved = req.resolve('@deepseek-ai/dsh/package.json')
+    if (typeof resolved === 'string' && resolved.startsWith('file:')) resolved = fileURLToPath(resolved)
+    const pkg = JSON.parse(readFileSync(resolved, 'utf8'))
+    if (typeof pkg.version === 'string' && pkg.version !== '') return pkg.version
+  } catch { /* fall through */ }
   const root = dirname(dshHome())
   try {
     const pkg = JSON.parse(readFileSync(join(root, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))

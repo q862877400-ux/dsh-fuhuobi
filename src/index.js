@@ -391,22 +391,23 @@ async function handleGuardedRestart(req, res) {
 }
 
 export function apply(ctx) {
-  // 1. Incident-alert prompt section.
-  const sp = ctx.get('systemPrompt')
-  if (sp !== undefined) {
-    sp.section({
+  // 1. Incident-alert prompt section. 用 ctx.inject 等服务就绪，而不是
+  //    point-in-time ctx.get —— 否则 systemPrompt 若晚于本行挂载，这段会
+  //    静默不注册（激活顺序依赖）。
+  ctx.inject(['systemPrompt'], (sctx) => {
+    sctx.effect(() => sctx.systemPrompt.section({
       name: 'fuhuobi:incident-alert',
       order: -50,
       text: () => incidentSectionText(),
-    })
-  }
+    }), 'fuhuobi: incident-alert prompt section')
+  })
 
   // 2. Pre-tool guard + guard tools. Auto-snapshot before mutating install
   // tools. Side-effect only: a guard never denies; snapshot errors are
   // swallowed so the install itself is never blocked by the safety net.
-  const tools = ctx.get('tools')
-  if (tools !== undefined) {
-    tools.guard((execution) => {
+  // 同样用 ctx.inject 等 tools 就绪（工具注册与守卫不因加载顺序静默丢失）。
+  ctx.inject(['tools'], (tctx) => {
+    tctx.effect(() => tctx.tools.guard((execution) => {
       if (GUARDED_TOOLS.has(execution.name)) {
         try {
           snapshotAll('auto-before-install', `pre-tool guard for ${execution.name}`)
@@ -415,12 +416,12 @@ export function apply(ctx) {
         }
       }
       return undefined
-    })
+    }), 'fuhuobi: pre-tool snapshot guard')
 
     for (const tool of createGuardTools()) {
-      tools.register(tool)
+      tctx.effect(() => tctx.tools.register(tool), 'fuhuobi: tool ' + tool.name)
     }
-  }
+  })
 
   // 3. 设置 > 备份管理 HTTP API. Registered from the single guard row when a
   // webServer exists; absent for non-web profiles (no separate apiOnly row).
